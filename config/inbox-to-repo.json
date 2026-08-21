@@ -1,0 +1,9 @@
+{
+  "_comment": "Map each Crisp inbox/segment to the GitHub repo it should be investigated against. Fill in real inbox IDs before Phase 2 can run -- an unmapped conversation is skipped, not guessed at. Find inbox IDs via GET https://api.crisp.chat/v1/website/{website_id}/settings (or the Crisp dashboard: Settings -> Inbox -> the inbox's ID appears in its URL/settings).",
+  "_format": "one entry per inbox_id: { \"repo\": \"org/repo\" }",
+  "inboxes": {
+    "REPLACE_WITH_REAL_INBOX_ID": {
+      "repo": "wpeverest/user-registration"
+    }
+  }
+}
