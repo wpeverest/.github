@@ -22,9 +22,15 @@ Do a manual dry run against one real resolved conversation before enabling the h
 
 ## 1. Crisp API tokens — one per account, not one total
 
-`user-registration` and `themegrill` are on **separate Crisp accounts** (different logins), not just different inboxes under one account — confirmed directly, not assumed. That means **two independent Plugin Tokens**, created separately in each account, and credentials cannot be shared between them.
+`user-registration` and `themegrill` are on **separate Crisp accounts** (different logins), not just different inboxes under one account — confirmed directly, not assumed. That means **two independent tokens**, created separately in each account, and credentials cannot be shared between them.
 
-For **each** account: log into that account, go to Settings → API → create a **Plugin Token** with conversation read and write scope (write is needed for the note-back-to-chat feature). You'll get an `identifier`/`key` pair and a website ID.
+Use a **Website Token**, not a Plugin Token — this matters, they're genuinely different things:
+- A **Plugin Token** requires a separate Marketplace developer account, creating a "plugin" there, requesting production-scope approval, and installing it on the website via a private install link. That's for third-party/distributable integrations — overkill for our own internal automation.
+- A **Website Token** is generated directly inside the workspace, no Marketplace account, no approval step. This is the right one.
+
+For **each** account: log into that Crisp account → **Settings → Workspace Settings → Advanced configuration** → **API Token** section → **Generate Token**. Copy the pair immediately — shown only once. This also gives you the website ID (visible in that same settings area, or in the URL).
+
+Note: Website Tokens are capped at 10,000 requests/day and only a workspace owner can manage them — both are fine for our hourly-poll volume.
 
 Naming convention — the account key (`USER_REGISTRATION`, `THEMEGRILL`, matching `config/inbox-to-repo.json`) must exactly match the suffix in these names:
 
