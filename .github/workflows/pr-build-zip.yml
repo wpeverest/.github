@@ -24,10 +24,13 @@ on:
         required: false
         default: 'yarn'
       pnpm-version:
-        description: 'pnpm version to install, when package-manager is pnpm.'
+        description: |
+          pnpm version to install. Leave empty (default) to auto-detect from
+          the repo's package.json "packageManager" field via Corepack -- set
+          this explicitly only for repos that don't pin one there.
         type: string
         required: false
-        default: '9'
+        default: ''
       install-command:
         description: 'Overrides the default install command entirely.'
         type: string
