@@ -77,11 +77,14 @@ jobs:
         with:
           path: .bot-tools
 
+      # tg-autopilot's fine-grained PAT is scoped to ONE resource owner --
+      # BOT_TOKEN covers wpeverest, BOT_TOKEN_THEMEGRILL covers themegrill.
+      # Pick whichever matches this conversation's target repo's org.
       - name: Check out target repo
         uses: actions/checkout@v4
         with:
           repository: ${{ matrix.repo }}
-          token: ${{ secrets.BOT_TOKEN }}
+          token: ${{ startsWith(matrix.repo, 'themegrill/') && secrets.BOT_TOKEN_THEMEGRILL || secrets.BOT_TOKEN }}
           path: workspace
 
       - uses: actions/setup-node@v4
@@ -140,7 +143,7 @@ jobs:
         working-directory: workspace
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ startsWith(matrix.repo, 'themegrill/') && secrets.BOT_TOKEN_THEMEGRILL || secrets.BOT_TOKEN }}
           CRISP_IDENTIFIER: ${{ secrets[format('CRISP_{0}_IDENTIFIER', matrix.account)] }}
           CRISP_KEY: ${{ secrets[format('CRISP_{0}_KEY', matrix.account)] }}
           CRISP_WEBSITE_ID: ${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}
