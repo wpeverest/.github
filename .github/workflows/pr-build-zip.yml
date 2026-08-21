@@ -19,10 +19,15 @@ on:
         required: false
         default: '7.4'
       package-manager:
-        description: 'yarn or npm. Selects the install command and cache paths.'
+        description: 'yarn, npm, or pnpm. Selects the install command and cache paths.'
         type: string
         required: false
         default: 'yarn'
+      pnpm-version:
+        description: 'pnpm version to install, when package-manager is pnpm.'
+        type: string
+        required: false
+        default: '9'
       install-command:
         description: 'Overrides the default install command entirely.'
         type: string
@@ -114,13 +119,23 @@ jobs:
           php-version: ${{ inputs.php-version }}
           tools: composer
 
+      # pnpm must be on PATH before setup-node's cache step runs, since that
+      # step shells out to the package manager to resolve the cache directory.
+      # Needed on PATH even when install-command overrides the install step
+      # (e.g. a build-command that shells out to pnpm/grunt itself).
+      - name: Set up pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+
       - name: Set up Node ${{ inputs.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
 
-      # Cache keyed on whichever lockfiles exist, so this works for both yarn
-      # and npm without the caller having to say which.
+      # Cache keyed on whichever lockfiles exist, so this works for yarn, npm,
+      # and pnpm without the caller having to say which.
       - name: Cache dependencies
         uses: actions/cache@v4
         with:
@@ -128,8 +143,9 @@ jobs:
             node_modules
             ~/.cache/yarn
             ~/.npm
+            ~/.local/share/pnpm/store
             ~/.cache/composer
-          key: ${{ runner.os }}-deps-${{ hashFiles('**/yarn.lock', '**/package-lock.json', '**/composer.lock') }}
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/yarn.lock', '**/package-lock.json', '**/pnpm-lock.yaml', '**/composer.lock') }}
           restore-keys: |
             ${{ runner.os }}-deps-
 
@@ -143,6 +159,8 @@ jobs:
             ${{ inputs.install-command }}
           elif [ "${{ inputs.package-manager }}" = "npm" ]; then
             npm ci
+          elif [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
           else
             yarn install --frozen-lockfile
           fi
