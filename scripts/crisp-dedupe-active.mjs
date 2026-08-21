@@ -35,8 +35,8 @@ async function resolveRepo(accountConfig, transcript, conversation) {
         `exact list it is about: ${productNames.join(", ")}. Never invent a name ` +
         'not in this list -- if you cannot tell, use "unknown". Also note whether ' +
         "it indicates the PRO/premium edition (license, purchase, Pro-only " +
-        'features) or free (default). Respond with ONLY: {"product": "<name>" | ' +
-        '"unknown", "edition": "free" | "pro"}.',
+        'features) or free (default). Respond with ONLY a JSON object: ' +
+        '{"product": "<name>" | "unknown", "edition": "free" | "pro"}.',
       transcript,
       { product: "unknown", edition: "free" }
     );
@@ -55,8 +55,8 @@ async function findMatchingIssue(transcript, issues) {
   const { matchedNumber } = await chatJSON(
     "You check whether a customer support transcript describes the SAME " +
       "underlying problem as one of these already-tracked GitHub issues:\n\n" +
-      `${list}\n\nRespond with ONLY {"matchedNumber": <issue number>} if there's ` +
-      'a genuine match, or {"matchedNumber": null} if none clearly match or ' +
+      `${list}\n\nRespond with ONLY a JSON object: {"matchedNumber": <issue number>} ` +
+      'if there is a genuine match, or {"matchedNumber": null} if none clearly match or ' +
       "you're unsure. Be conservative -- a wrong match creates noise on someone " +
       "else's issue, so only match when the described problem is really the same.",
     transcript,
