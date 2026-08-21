@@ -46,8 +46,18 @@ Grant public read once, at the bucket level:
 forever. Keep the number in step with the `retention-days` input, which is only
 the text shown in the PR comment.
 
-Then set the org secrets `ARTIFACTS_BUCKET`, `ARTIFACTS_KEY`, `ARTIFACTS_SECRET`,
-and point `public-base-url` at whatever domain fronts the bucket.
+Then set the org secrets `ARTIFACTS_KEY` and `ARTIFACTS_SECRET`. **Do not**
+make the bucket name itself a secret — pass it as the plain `artifacts-bucket`
+input in each caller workflow instead, and point `public-base-url` at whatever
+domain fronts the bucket.
+
+> A bucket name isn't sensitive, and treating it as one backfires: GitHub
+> Actions masks any string matching *any* registered secret's value, wherever
+> that string shows up. If the bucket name is a secret, it gets masked to
+> `***` inside `public-base-url` too — even though that's a plain input —
+> which breaks the download link in the PR comment. Learned this the hard way
+> during Phase 1 testing; keep only the actual credentials (access key ID and
+> secret access key) as secrets.
 
 ## 3. Cross-org constraint — decide this before rolling out
 
@@ -69,7 +79,6 @@ Cross-org callers must pass each secret explicitly instead:
 ```yaml
 secrets:
   BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-  ARTIFACTS_BUCKET: ${{ secrets.ARTIFACTS_BUCKET }}
   ARTIFACTS_KEY: ${{ secrets.ARTIFACTS_KEY }}
   ARTIFACTS_SECRET: ${{ secrets.ARTIFACTS_SECRET }}
 ```

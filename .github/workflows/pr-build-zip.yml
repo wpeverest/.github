@@ -58,6 +58,15 @@ on:
         type: string
         required: false
         default: ''
+      artifacts-bucket:
+        description: |
+          Bucket name to upload to. Not sensitive -- passed as a plain input,
+          not a secret. (If it WERE a secret, its value would get masked to
+          "***" everywhere it appears, including inside public-base-url and
+          the PR comment body, since Actions masks any string matching any
+          registered secret's value, wherever that string shows up.)
+        type: string
+        required: true
       public-base-url:
         description: |
           Public base URL that fronts the bucket, no trailing slash.
@@ -88,8 +97,6 @@ on:
     secrets:
       BOT_TOKEN:
         description: 'PAT of the tg-autopilot machine user. Makes the comment come from the bot identity.'
-        required: true
-      ARTIFACTS_BUCKET:
         required: true
       ARTIFACTS_KEY:
         required: true
@@ -218,7 +225,7 @@ jobs:
           # No --acl: modern S3 buckets enforce bucket-owner ownership (ACLs
           # disabled) and R2 has no ACLs at all. Public read comes from the
           # bucket policy / R2 public access, configured once at setup.
-          aws s3 cp "${{ steps.zip.outputs.path }}" "s3://${{ secrets.ARTIFACTS_BUCKET }}/${KEY}" \
+          aws s3 cp "${{ steps.zip.outputs.path }}" "s3://${{ inputs.artifacts-bucket }}/${KEY}" \
             $ENDPOINT --no-progress --content-type application/zip
           echo "url=${{ inputs.public-base-url }}/${KEY}" >> "$GITHUB_OUTPUT"
 
