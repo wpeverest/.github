@@ -71,13 +71,26 @@ jobs:
           BOT_TOKEN_THEMEGRILL: ${{ secrets.BOT_TOKEN_THEMEGRILL }}
         run: node scripts/crisp-dedupe-active.mjs
 
+      # Retries on a non-fast-forward push: master can move between this
+      # job's checkout and this step (e.g. an unrelated PR merging in the
+      # meantime) -- observed for real once already. Rebase-and-retry rather
+      # than fail the whole run over a state-file commit race.
       - name: Commit advanced state
         run: |
           git config user.name "tg-autopilot"
           git config user.email "tg-autopilot@users.noreply.github.com"
           git add state/cursor.json state/active-notified.json
           git diff --cached --quiet || git commit -m "Advance Crisp triage state [skip ci]"
-          git push
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt/5), rebasing onto origin/master and retrying..."
+            git fetch origin master
+            git rebase origin/master
+          done
+          echo "::error::Failed to push advanced state after 5 attempts"
+          exit 1
 
   investigate:
     name: Investigate (${{ matrix.session_id }})
