@@ -1,20 +1,12 @@
 {
-  "_comment": "Two separate Crisp ACCOUNTS (different logins/billing), not just different inboxes under one account. Each top-level key here must exactly match the suffix used in that account's secrets/variable names: CRISP_<KEY>_IDENTIFIER, CRISP_<KEY>_KEY (both secrets), CRISP_<KEY>_WEBSITE_ID (a variable, not a secret). Use this exact uppercase-with-underscores form, since GitHub Actions expressions have no case-conversion helper to derive it automatically.",
-  "_format": "accounts.<ACCOUNT_KEY>.inboxes.<inbox_id> = { repo }",
+  "_comment": "Two separate Crisp ACCOUNTS (different logins/billing), not just different inboxes under one account. Each top-level key here must exactly match the suffix used in that account's secrets/variable names: CRISP_<KEY>_IDENTIFIER, CRISP_<KEY>_KEY (both secrets), CRISP_<KEY>_WEBSITE_ID (a variable, not a secret).",
+  "_format": "accounts.<ACCOUNT_KEY> = { \"repo\": \"org/repo\" } for a single-product account (everything from this account goes to one repo, no inbox lookup needed), OR { \"inboxes\": { \"<inbox_id>\": { \"repo\": \"org/repo\" } } } once one account genuinely serves multiple products needing different repos.",
   "accounts": {
     "USER_REGISTRATION": {
-      "inboxes": {
-        "REPLACE_WITH_REAL_INBOX_ID": {
-          "repo": "wpeverest/user-registration"
-        }
-      }
+      "repo": "wpeverest/user-registration"
     },
     "THEMEGRILL": {
-      "inboxes": {
-        "REPLACE_WITH_REAL_INBOX_ID": {
-          "repo": "wpeverest/themegrill-issues"
-        }
-      }
+      "repo": "wpeverest/themegrill-issues"
     }
   }
 }
