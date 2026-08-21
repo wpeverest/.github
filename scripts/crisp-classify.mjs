@@ -22,47 +22,13 @@ import {
   fetchTranscript,
   credsForAccount,
 } from "./crisp-client.mjs";
+import { chatJSON } from "./openai-client.mjs";
 
-const { OPENAI_API_KEY, CLASSIFY_MODEL, GITHUB_STEP_SUMMARY } = process.env;
-for (const [name, value] of Object.entries({ OPENAI_API_KEY, CLASSIFY_MODEL })) {
-  if (!value) {
-    console.error(`Missing required env var: ${name}`);
-    process.exit(1);
-  }
-}
-
-async function callOpenAI(systemPrompt, transcript, fallback) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: CLASSIFY_MODEL,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: transcript },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`OpenAI classify failed: ${res.status} ${await res.text()}`);
-  }
-  const { choices } = await res.json();
-  const text = choices?.[0]?.message?.content ?? "{}";
-  try {
-    return JSON.parse(text);
-  } catch {
-    console.error(`Unparseable classification response, treating as non-actionable: ${text}`);
-    return fallback;
-  }
-}
+const { GITHUB_STEP_SUMMARY } = process.env;
 
 // For a single-product (or Crisp-tagged-inbox) account: just actionable/kind.
 async function classify(transcript) {
-  return callOpenAI(
+  return chatJSON(
     "You triage customer support transcripts for a WordPress plugin company. " +
       "Given a transcript, decide if it describes an actionable software " +
       "defect (bug) or a genuine feature request -- as opposed to a billing " +
@@ -83,7 +49,7 @@ async function classify(transcript) {
 // list only -- never invent a name) and free/pro edition. Unknown product is
 // the safe default: skipped and logged for a human to add, not guessed at.
 async function classifyWithProduct(transcript, productNames) {
-  return callOpenAI(
+  return chatJSON(
     "You triage customer support transcripts for a WordPress theme/plugin company " +
       "with many products. Given a transcript, decide (1) if it describes an " +
       "actionable software defect (bug) or a genuine feature request -- as opposed " +

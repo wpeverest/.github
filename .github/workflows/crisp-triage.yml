@@ -54,12 +54,29 @@ jobs:
           node scripts/crisp-classify.mjs
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Commit advanced cursor
+      # Separate from the resolved-conversation pipeline above: never files a
+      # new issue, only flags a match against an already-open one -- safe to
+      # run on a conversation that isn't finished yet, unlike full investigation.
+      - name: Check active conversations for duplicates
+        env:
+          CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
+          CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
+          CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
+          CRISP_THEMEGRILL_IDENTIFIER: ${{ secrets.CRISP_THEMEGRILL_IDENTIFIER }}
+          CRISP_THEMEGRILL_KEY: ${{ secrets.CRISP_THEMEGRILL_KEY }}
+          CRISP_THEMEGRILL_WEBSITE_ID: ${{ vars.CRISP_THEMEGRILL_WEBSITE_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLASSIFY_MODEL: ${{ vars.CLASSIFY_MODEL || 'gpt-5-mini' }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          BOT_TOKEN_THEMEGRILL: ${{ secrets.BOT_TOKEN_THEMEGRILL }}
+        run: node scripts/crisp-dedupe-active.mjs
+
+      - name: Commit advanced state
         run: |
           git config user.name "tg-autopilot"
           git config user.email "tg-autopilot@users.noreply.github.com"
-          git add state/cursor.json
-          git diff --cached --quiet || git commit -m "Advance Crisp triage cursor [skip ci]"
+          git add state/cursor.json state/active-notified.json
+          git diff --cached --quiet || git commit -m "Advance Crisp triage state [skip ci]"
           git push
 
   investigate:
