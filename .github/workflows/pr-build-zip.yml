@@ -1,0 +1,240 @@
+# Reusable workflow: build a testable plugin/theme ZIP for a PR, upload it to
+# object storage, and keep ONE PR comment updated with a direct download link.
+#
+# Lives in wpeverest/.github. Consuming repos call it with a short caller
+# workflow -- see pr-build-zip.caller.yml for a template.
+name: PR Build ZIP
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node version to build with.'
+        type: string
+        required: false
+        default: '20.x'
+      php-version:
+        description: 'PHP version to build with.'
+        type: string
+        required: false
+        default: '7.4'
+      package-manager:
+        description: 'yarn or npm. Selects the install command and cache paths.'
+        type: string
+        required: false
+        default: 'yarn'
+      install-command:
+        description: 'Overrides the default install command entirely.'
+        type: string
+        required: false
+        default: ''
+      composer-install:
+        description: 'Run composer install before building.'
+        type: boolean
+        required: false
+        default: true
+      build-command:
+        description: |
+          Command(s) that produce the distributable ZIP. This should call the
+          repo's OWN release tooling (gulp release, yarn dist, ...) so packaging
+          rules such as .distignore stay owned by the repo, not by the bot.
+        type: string
+        required: true
+      zip-glob:
+        description: 'Where to find the produced ZIP. First match wins.'
+        type: string
+        required: false
+        default: 'release/*.zip'
+      artifact-prefix:
+        description: 'Storage key prefix. Defaults to the repository name.'
+        type: string
+        required: false
+        default: ''
+      public-base-url:
+        description: |
+          Public base URL that fronts the bucket, no trailing slash.
+          e.g. https://artifacts.themegrill.com  (S3 website/CloudFront, R2
+          custom domain, or the r2.dev subdomain).
+        type: string
+        required: true
+      s3-endpoint:
+        description: 'Custom S3 endpoint. Required for Cloudflare R2, leave empty for AWS S3.'
+        type: string
+        required: false
+        default: ''
+      s3-region:
+        description: 'Bucket region. Use "auto" for R2.'
+        type: string
+        required: false
+        default: 'us-east-1'
+      retention-days:
+        description: 'Stated link lifetime, for the comment text. Must match the bucket lifecycle rule.'
+        type: number
+        required: false
+        default: 30
+      timezone:
+        description: 'Timezone for the "last updated" stamp in the comment.'
+        type: string
+        required: false
+        default: 'Asia/Kathmandu'
+    secrets:
+      BOT_TOKEN:
+        description: 'PAT of the tg-autopilot machine user. Makes the comment come from the bot identity.'
+        required: true
+      ARTIFACTS_BUCKET:
+        required: true
+      ARTIFACTS_KEY:
+        required: true
+      ARTIFACTS_SECRET:
+        required: true
+
+concurrency:
+  # Collapse rapid pushes to the same PR so builds do not stack up.
+  group: pr-build-zip-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ZIP and comment
+    # Skip drafts, but always run a manual dispatch.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ inputs.php-version }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          tools: composer
+
+      - name: Set up Node ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      # Cache keyed on whichever lockfiles exist, so this works for both yarn
+      # and npm without the caller having to say which.
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.cache/yarn
+            ~/.npm
+            ~/.cache/composer
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/yarn.lock', '**/package-lock.json', '**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      - name: Install Composer dependencies
+        if: inputs.composer-install
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Install JS dependencies
+        run: |
+          if [ -n "${{ inputs.install-command }}" ]; then
+            ${{ inputs.install-command }}
+          elif [ "${{ inputs.package-manager }}" = "npm" ]; then
+            npm ci
+          else
+            yarn install --frozen-lockfile
+          fi
+
+      - name: Build distributable
+        run: ${{ inputs.build-command }}
+
+      - name: Locate the ZIP
+        id: zip
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          ZIP=$(ls -1 ${{ inputs.zip-glob }} 2>/dev/null | head -n 1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "::error::No ZIP matched '${{ inputs.zip-glob }}'. Check build-command and zip-glob."
+            exit 1
+          fi
+          echo "path=$ZIP" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
+          echo "size=$(du -h "$ZIP" | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute storage key
+        id: key
+        env:
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          SHA8=$(echo "${{ github.event.pull_request.head.sha || github.sha }}" | cut -c1-8)
+          BRANCH=$(echo "$HEAD_REF" | sed 's#[^a-zA-Z0-9._-]#-#g')
+          PREFIX="${{ inputs.artifact-prefix }}"
+          [ -n "$PREFIX" ] || PREFIX="${{ github.event.repository.name }}"
+          echo "sha8=$SHA8" >> "$GITHUB_OUTPUT"
+          echo "dir=${PREFIX}-${BRANCH}-${SHA8}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload ZIP to object storage
+        id: upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ARTIFACTS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ARTIFACTS_SECRET }}
+          AWS_DEFAULT_REGION: ${{ inputs.s3-region }}
+        run: |
+          set -euo pipefail
+          ENDPOINT=""
+          if [ -n "${{ inputs.s3-endpoint }}" ]; then
+            ENDPOINT="--endpoint-url ${{ inputs.s3-endpoint }}"
+          fi
+          KEY="${{ steps.key.outputs.dir }}/${{ steps.zip.outputs.name }}"
+          # No --acl: modern S3 buckets enforce bucket-owner ownership (ACLs
+          # disabled) and R2 has no ACLs at all. Public read comes from the
+          # bucket policy / R2 public access, configured once at setup.
+          aws s3 cp "${{ steps.zip.outputs.path }}" "s3://${{ secrets.ARTIFACTS_BUCKET }}/${KEY}" \
+            $ENDPOINT --no-progress --content-type application/zip
+          echo "url=${{ inputs.public-base-url }}/${KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp build time
+        id: stamp
+        run: echo "at=$(TZ='${{ inputs.timezone }}' date '+%b %-d, %Y %-I:%M %p %Z')" >> "$GITHUB_OUTPUT"
+
+      # Find our own previous comment by AUTHOR + marker.
+      # Never match on comment.user.type == 'Bot': a machine user account is
+      # type "User", so that check silently never matches and every push would
+      # post a brand new comment.
+      - name: Find previous bot comment
+        uses: peter-evans/find-comment@v3
+        id: find
+        if: github.event_name == 'pull_request'
+        with:
+          token: ${{ secrets.BOT_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: tg-autopilot
+          body-includes: '<!-- tg-autopilot: pr-build-zip -->'
+
+      - name: Post or update the PR comment
+        uses: peter-evans/create-or-update-comment@v4
+        if: github.event_name == 'pull_request'
+        with:
+          token: ${{ secrets.BOT_TOKEN }}
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            <!-- tg-autopilot: pr-build-zip -->
+            Build for `${{ steps.key.outputs.sha8 }}` is ready :bellhop_bell:
+
+            **[:arrow_down: Download ${{ steps.zip.outputs.name }}](${{ steps.upload.outputs.url }})** (${{ steps.zip.outputs.size }})
+
+            Installs directly via **Plugins → Add New → Upload Plugin**.
+            Link expires in ${{ inputs.retention-days }} days · updated ${{ steps.stamp.outputs.at }}
+
+      - name: Run summary
+        run: |
+          {
+            echo "### Build ZIP"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${{ steps.key.outputs.sha8 }}\` |"
+            echo "| ZIP | ${{ steps.zip.outputs.name }} (${{ steps.zip.outputs.size }}) |"
+            echo "| Download | ${{ steps.upload.outputs.url }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
