@@ -91,11 +91,18 @@ async function main() {
     console.log(`[${accountKey}] fetched ${conversations.length} resolved conversations since ${cursor.last_checked}`);
 
     for (const conversation of conversations) {
-      const inboxKey = getInboxKey(conversation);
-      const mapping = inboxKey && accountConfig.inboxes[inboxKey];
-      if (!mapping) {
-        skippedUnmapped.push({ account: accountKey, session_id: conversation.session_id, inboxKey });
-        continue;
+      // A single-product account maps everything to one repo directly, no
+      // inbox lookup needed. Only accounts with an `inboxes` map (i.e. one
+      // Crisp account serving multiple products) need per-inbox routing.
+      let repo = accountConfig.repo;
+      if (!repo) {
+        const inboxKey = getInboxKey(conversation);
+        const mapping = inboxKey && accountConfig.inboxes?.[inboxKey];
+        if (!mapping) {
+          skippedUnmapped.push({ account: accountKey, session_id: conversation.session_id, inboxKey });
+          continue;
+        }
+        repo = mapping.repo;
       }
 
       const transcript = await fetchTranscript(creds, conversation.session_id);
@@ -105,7 +112,7 @@ async function main() {
       console.log(`[${accountKey}] ${conversation.session_id}: actionable=${actionable} kind=${kind}`);
 
       if (actionable && kind !== "none") {
-        matrix.push({ session_id: conversation.session_id, repo: mapping.repo, kind, account: accountKey });
+        matrix.push({ session_id: conversation.session_id, repo, kind, account: accountKey });
       }
     }
   }
