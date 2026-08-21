@@ -58,7 +58,16 @@ Phase 1's PAT has **Contents: Read-only**. Stage 1 needs to commit the advanced 
 
 ## 4. Populate `config/inbox-to-repo.json`
 
-Replace the placeholder entry with real Crisp inbox IDs mapped to the repo each should investigate against. An unmapped conversation is **skipped, not guessed at** — check the workflow's step summary after a run for any inbox keys it saw but couldn't map, and add them if real.
+`USER_REGISTRATION` maps directly to one repo. `THEMEGRILL` is different: one Crisp account serves 25+ themes/plugins with no structured signal (segments are generic tags like "free"/"night", not per-product) for which one a conversation is about — so Stage 1's classifier reads the transcript itself and names a product from the known list in `config/inbox-to-repo.json`, plus whether it's the free or pro edition. An unmatched/unidentifiable product is **skipped and logged in the run summary, not guessed at** — check there periodically and add real products the classifier is missing.
+
+## 4b. A second bot token, because two orgs
+
+`themegrill` repos (colormag, zakra, etc.) are a different GitHub org from `wpeverest`, and a fine-grained PAT is scoped to exactly **one** resource owner. `tg-autopilot`'s existing PAT (scoped to `wpeverest`) cannot reach them, regardless of `tg-autopilot`'s org membership.
+
+- Generate a **second** fine-grained PAT for `tg-autopilot`, **resource owner: `themegrill`**, repository access "All repositories" if available (28+ products and growing), permissions: Contents Read, Issues Read+write, Pull requests Read+write, Metadata Read.
+- Store it as org secret **`BOT_TOKEN_THEMEGRILL`** — in `wpeverest`, same as every other secret, because that's where the workflow *runs*, regardless of which org the token itself grants access into.
+- `themegrill`'s org default repo permission happens to be **write** for all members, so once `tg-autopilot` is a member there, it already has write access to every repo — no per-repo collaborator setup was needed, just the org invite and this token.
+- The workflow picks whichever token matches a conversation's target repo's org: `startsWith(matrix.repo, 'themegrill/') && secrets.BOT_TOKEN_THEMEGRILL || secrets.BOT_TOKEN`. Onboarding a third org later means the same pattern: a new PAT, a new secret, one more branch in that expression (or, once there are more than two, worth switching to a lookup table instead).
 
 ## 5. Sanity-check cost before enabling the schedule
 

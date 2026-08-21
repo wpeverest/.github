@@ -31,7 +31,7 @@ for (const [name, value] of Object.entries({ OPENAI_API_KEY, CLASSIFY_MODEL })) 
   }
 }
 
-async function classify(transcript) {
+async function callOpenAI(systemPrompt, transcript, fallback) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -42,20 +42,7 @@ async function classify(transcript) {
       model: CLASSIFY_MODEL,
       response_format: { type: "json_object" },
       messages: [
-        {
-          role: "system",
-          content:
-            "You triage customer support transcripts for a WordPress plugin company. " +
-            "Given a transcript, decide if it describes an actionable software " +
-            "defect (bug) or a genuine feature request -- as opposed to a billing " +
-            "question, how-to question, client-side misconfiguration, or anything " +
-            "that isn't a product code issue. Respond with ONLY a JSON object: " +
-            '{"actionable": boolean, "kind": "bug" | "feature" | "none"}. ' +
-            "Be conservative: when genuinely unsure whether it's a real product " +
-            'defect, prefer {"actionable": false, "kind": "none"} -- the next ' +
-            "stage is expensive, so false positives cost real money and false " +
-            "negatives just wait for a clearer report.",
-        },
+        { role: "system", content: systemPrompt },
         { role: "user", content: transcript },
       ],
     }),
@@ -69,8 +56,53 @@ async function classify(transcript) {
     return JSON.parse(text);
   } catch {
     console.error(`Unparseable classification response, treating as non-actionable: ${text}`);
-    return { actionable: false, kind: "none" };
+    return fallback;
   }
+}
+
+// For a single-product (or Crisp-tagged-inbox) account: just actionable/kind.
+async function classify(transcript) {
+  return callOpenAI(
+    "You triage customer support transcripts for a WordPress plugin company. " +
+      "Given a transcript, decide if it describes an actionable software " +
+      "defect (bug) or a genuine feature request -- as opposed to a billing " +
+      "question, how-to question, client-side misconfiguration, or anything " +
+      "that isn't a product code issue. Respond with ONLY a JSON object: " +
+      '{"actionable": boolean, "kind": "bug" | "feature" | "none"}. ' +
+      "Be conservative: when genuinely unsure whether it's a real product " +
+      'defect, prefer {"actionable": false, "kind": "none"} -- the next ' +
+      "stage is expensive, so false positives cost real money and false " +
+      "negatives just wait for a clearer report.",
+    transcript,
+    { actionable: false, kind: "none" }
+  );
+}
+
+// For an account with many products and no structured Crisp signal for which
+// one: same actionable/kind decision, plus which product (from the known
+// list only -- never invent a name) and free/pro edition. Unknown product is
+// the safe default: skipped and logged for a human to add, not guessed at.
+async function classifyWithProduct(transcript, productNames) {
+  return callOpenAI(
+    "You triage customer support transcripts for a WordPress theme/plugin company " +
+      "with many products. Given a transcript, decide (1) if it describes an " +
+      "actionable software defect (bug) or a genuine feature request -- as opposed " +
+      "to a billing question, how-to question, client-side misconfiguration, or " +
+      "anything that isn't a product code issue; (2) which ONE product from this " +
+      `exact list it is about: ${productNames.join(", ")}. Never invent a name not ` +
+      'in this list -- if you cannot tell, or it doesn\'t match any of these, use ' +
+      '"unknown"; (3) whether the transcript indicates the PRO/premium edition ' +
+      "(mentions of a license, purchase, or Pro-only features) or the free edition " +
+      "(the default when unclear). Respond with ONLY a JSON object: " +
+      '{"actionable": boolean, "kind": "bug" | "feature" | "none", ' +
+      '"product": "<exact-name-from-list>" | "unknown", "edition": "free" | "pro"}. ' +
+      "Be conservative on actionable/kind: when genuinely unsure whether it's a " +
+      'real product defect, prefer {"actionable": false, "kind": "none"} -- the ' +
+      "next stage is expensive, so false positives cost real money and false " +
+      "negatives just wait for a clearer report.",
+    transcript,
+    { actionable: false, kind: "none", product: "unknown", edition: "free" }
+  );
 }
 
 async function main() {
@@ -99,11 +131,30 @@ async function main() {
     console.log(`[${accountKey}] fetched ${conversations.length} resolved conversations since ${cursor.last_checked}`);
 
     for (const conversation of conversations) {
-      // A single-product account maps everything to one repo directly, no
-      // inbox lookup needed. Only accounts with an `inboxes` map (i.e. one
-      // Crisp account serving multiple products) need per-inbox routing.
-      let repo = accountConfig.repo;
-      if (!repo) {
+      const transcript = await fetchTranscript(creds, conversation.session_id);
+      if (!transcript.trim()) continue;
+
+      // Three routing modes, checked in order: a single-product account maps
+      // everything to one repo directly (no lookup at all); an `inboxes` map
+      // is for when Crisp itself structurally tags which product an inbox
+      // serves; `products` is for an account with many products and no such
+      // signal, where the classifier itself has to name which one.
+      let repo, actionable, kind;
+
+      if (accountConfig.repo) {
+        repo = accountConfig.repo;
+        ({ actionable, kind } = await classify(transcript));
+      } else if (accountConfig.products) {
+        const productNames = Object.keys(accountConfig.products);
+        const result = await classifyWithProduct(transcript, productNames);
+        ({ actionable, kind } = result);
+        const mapping = accountConfig.products[result.product];
+        if (!mapping) {
+          skippedUnmapped.push({ account: accountKey, session_id: conversation.session_id, inboxKey: `product:${result.product}` });
+          continue;
+        }
+        repo = result.edition === "pro" && mapping.pro ? mapping.pro : mapping.free;
+      } else {
         const inboxKey = getInboxKey(conversation);
         const mapping = inboxKey && accountConfig.inboxes?.[inboxKey];
         if (!mapping) {
@@ -111,13 +162,10 @@ async function main() {
           continue;
         }
         repo = mapping.repo;
+        ({ actionable, kind } = await classify(transcript));
       }
 
-      const transcript = await fetchTranscript(creds, conversation.session_id);
-      if (!transcript.trim()) continue;
-
-      const { actionable, kind } = await classify(transcript);
-      console.log(`[${accountKey}] ${conversation.session_id}: actionable=${actionable} kind=${kind}`);
+      console.log(`[${accountKey}] ${conversation.session_id}: actionable=${actionable} kind=${kind} repo=${repo}`);
 
       if (actionable && kind !== "none") {
         matrix.push({ session_id: conversation.session_id, repo, kind, account: accountKey });
@@ -135,7 +183,7 @@ async function main() {
       `Fetched: ${totalFetched} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length}`,
     ];
     if (skippedUnmapped.length) {
-      lines.push(``, `Unmapped inbox keys seen (add these to config/inbox-to-repo.json if real):`);
+      lines.push(``, `Unmapped inbox keys / unidentified products seen (add these to config/inbox-to-repo.json if real):`);
       for (const s of skippedUnmapped) lines.push(`- [${s.account}] \`${s.inboxKey}\` (session ${s.session_id})`);
     }
     await writeFile(GITHUB_STEP_SUMMARY, lines.join("\n") + "\n", { flag: "a" });

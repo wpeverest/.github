@@ -1,12 +1,41 @@
 {
   "_comment": "Two separate Crisp ACCOUNTS (different logins/billing), not just different inboxes under one account. Each top-level key here must exactly match the suffix used in that account's secrets/variable names: CRISP_<KEY>_IDENTIFIER, CRISP_<KEY>_KEY (both secrets), CRISP_<KEY>_WEBSITE_ID (a variable, not a secret).",
-  "_format": "accounts.<ACCOUNT_KEY> = { \"repo\": \"org/repo\" } for a single-product account (everything from this account goes to one repo, no inbox lookup needed), OR { \"inboxes\": { \"<inbox_id>\": { \"repo\": \"org/repo\" } } } once one account genuinely serves multiple products needing different repos.",
+  "_format": "accounts.<ACCOUNT_KEY> = one of: { \"repo\": \"org/repo\" } for a single-product account (everything goes to one repo, no product/inbox lookup); { \"inboxes\": { \"<inbox_id>\": { \"repo\": \"org/repo\" } } } when Crisp itself structurally tags which product an inbox serves; or { \"products\": { \"<name>\": { \"free\": \"org/repo\", \"pro\": \"org/repo\" } } } when one account covers many products with no structured Crisp signal for which one -- the classifier reads the transcript itself to pick a product name from this list (or 'unknown', which is skipped and logged, not guessed at) plus free/pro edition.",
   "accounts": {
     "USER_REGISTRATION": {
       "repo": "wpeverest/user-registration"
     },
     "THEMEGRILL": {
-      "repo": "wpeverest/themegrill-issues"
+      "products": {
+        "accelerate": { "free": "themegrill/accelerate", "pro": "themegrill/accelerate-pro" },
+        "ample": { "free": "themegrill/ample", "pro": "themegrill/ample-pro" },
+        "cenote": { "free": "themegrill/cenote", "pro": "themegrill/cenote-pro" },
+        "colormag": { "free": "themegrill/colormag", "pro": "themegrill/colormag-pro" },
+        "colornews": { "free": "themegrill/colornews", "pro": "themegrill/colornews-pro" },
+        "elearning": { "free": "themegrill/elearning" },
+        "envince": { "free": "themegrill/envince", "pro": "themegrill/envince-pro" },
+        "esteem": { "free": "themegrill/esteem", "pro": "themegrill/esteem-pro" },
+        "estore": { "free": "themegrill/estore", "pro": "themegrill/estore-pro" },
+        "explore": { "free": "themegrill/explore" },
+        "fitclub": { "free": "themegrill/fitclub", "pro": "themegrill/fitclub-pro" },
+        "flash": { "free": "themegrill/flash", "pro": "themegrill/flash-pro" },
+        "foodhunt": { "free": "themegrill/foodhunt", "pro": "themegrill/foodhunt-pro" },
+        "freedom": { "free": "themegrill/freedom", "pro": "themegrill/freedom-pro" },
+        "himalayas": { "free": "themegrill/himalayas", "pro": "themegrill/himalayas-pro" },
+        "libreria": { "free": "themegrill/libreria" },
+        "masonic": { "free": "themegrill/masonic" },
+        "ornatedecor": { "free": "themegrill/ornatedecor" },
+        "radiate": { "free": "themegrill/radiate", "pro": "themegrill/radiate-pro" },
+        "skincare": { "free": "themegrill/skincare" },
+        "spacious": { "free": "themegrill/spacious", "pro": "themegrill/spacious-pro" },
+        "suffice": { "free": "themegrill/suffice", "pro": "themegrill/suffice-pro" },
+        "zakra": { "free": "themegrill/zakra", "pro": "themegrill/zakra-pro" },
+        "easy-social-sharing": { "free": "themegrill/easy-social-sharing" },
+        "social-icons": { "free": "themegrill/social-icons" },
+        "blockart-blocks": { "free": "themegrill/blockart-blocks", "pro": "themegrill/blockart-blocks-pro" },
+        "themegrill-demo-importer": { "free": "themegrill/themegrill-demo-importer" },
+        "maintenance-page": { "free": "themegrill/maintenance-page" }
+      }
     }
   }
 }
