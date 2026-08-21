@@ -120,8 +120,15 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name)
     runs-on: ubuntu-latest
     steps:
+      # Explicit ref: without it, actions/checkout on a pull_request event
+      # checks out GitHub's synthetic merge commit (refs/pull/N/merge), not
+      # literally the PR's own head commit -- usually identical in content,
+      # but not guaranteed to be, and we label the zip by head.sha below, so
+      # build exactly that commit.
       - name: Check out PR head
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up PHP ${{ inputs.php-version }}
         uses: shivammathur/setup-php@v2
@@ -196,6 +203,10 @@ jobs:
           echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
           echo "size=$(du -h "$ZIP" | cut -f1)" >> "$GITHUB_OUTPUT"
 
+      # Keyed by branch, not commit SHA: each new push to the same PR overwrites
+      # the same object instead of piling up a fresh one per push. A PR with 20
+      # commits leaves exactly one zip in the bucket, not 20 waiting on the
+      # 30-day lifecycle rule to clean them up.
       - name: Compute storage key
         id: key
         env:
@@ -207,7 +218,7 @@ jobs:
           PREFIX="${{ inputs.artifact-prefix }}"
           [ -n "$PREFIX" ] || PREFIX="${{ github.event.repository.name }}"
           echo "sha8=$SHA8" >> "$GITHUB_OUTPUT"
-          echo "dir=${PREFIX}-${BRANCH}-${SHA8}" >> "$GITHUB_OUTPUT"
+          echo "dir=${PREFIX}-${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload ZIP to object storage
         id: upload
