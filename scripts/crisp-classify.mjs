@@ -75,9 +75,17 @@ async function main() {
   const runStartedAt = new Date().toISOString();
   const cursor = JSON.parse(await readFile("state/cursor.json", "utf8"));
   const accounts = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).accounts;
+  // If the active-conversation dedupe check already matched this session to
+  // a tracked issue while it was still open, running it through the full
+  // pipeline again just produces a second, redundant "recurrence" comment on
+  // the same issue -- observed for real on themegrill/colormag#291.
+  const activeNotified = new Set(
+    JSON.parse(await readFile("state/active-notified.json", "utf8").catch(() => "[]"))
+  );
 
   const matrix = [];
   const skippedUnmapped = [];
+  let alreadyHandled = 0;
   let totalFetched = 0;
 
   // Two separate Crisp ACCOUNTS (different logins), not just different
@@ -97,6 +105,11 @@ async function main() {
     console.log(`[${accountKey}] fetched ${conversations.length} resolved conversations since ${cursor.last_checked}`);
 
     for (const conversation of conversations) {
+      if (activeNotified.has(conversation.session_id)) {
+        alreadyHandled++;
+        continue;
+      }
+
       const transcript = await fetchTranscript(creds, conversation.session_id);
       if (!transcript.trim()) continue;
 
@@ -146,7 +159,7 @@ async function main() {
     const lines = [
       `### Crisp triage — Stage 1`,
       ``,
-      `Fetched: ${totalFetched} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length}`,
+      `Fetched: ${totalFetched} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled}`,
     ];
     if (skippedUnmapped.length) {
       lines.push(``, `Unmapped inbox keys / unidentified products seen (add these to config/inbox-to-repo.json if real):`);
