@@ -20,6 +20,7 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
    ```
    If you find a genuine match:
    - Comment on it noting this is a recurrence, briefly stating what this conversation adds, and linking `[Crisp conversation]({{CONVERSATION_URL}})` as the source (do not repeat the full diagnosis if the issue already has one).
+   - Also leave a note back in the support conversation (step 5 below) linking that existing issue, so the team has a signal even though nothing new was filed.
    - Stop here. Do not file a new issue for something already tracked.
 
 3. **If it's a confirmed new bug or feature, and nothing tracks it yet**, file one issue:
@@ -49,14 +50,19 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
    **Source:** [Crisp conversation]({{CONVERSATION_URL}})
    ```
 
-4. **If investigation concludes this is NOT a real product defect** (client-side misconfiguration, user error, already fixed, or you genuinely cannot substantiate it from the code) — **do not stay silent**. Post a short, factual note back into the support conversation so the team has a signal either way:
+4. **If investigation concludes this is NOT a real product defect** (client-side misconfiguration, user error, already fixed, or you genuinely cannot substantiate it from the code) — note that in the conversation too (step 5), instead of filing anything.
+
+5. **Always leave a note back in the support conversation** reflecting whichever of the above actually happened -- this step runs every time, no exceptions:
    ```
-   node "$HOME/tg-autopilot/crisp-post-note.mjs" {{SESSION_ID}} "<one or two sentence explanation of why this doesn't look like a product bug>"
+   node "$HOME/tg-autopilot/crisp-post-note.mjs" {{SESSION_ID}} "<note>"
    ```
-   Do this instead of filing an issue, not in addition to one.
+   - New issue filed: mention it's a bug/feature report and include the issue URL (`gh issue create`'s own output is that URL).
+   - Matched an existing issue: include that issue's URL.
+   - Not a real product defect: a short, factual one-or-two-sentence explanation of why -- do not send this as a canned "we're already looking into it" line, since nothing is actually being looked into in this case.
 
 ## Rules
 
-- Exactly one outcome per run: a new issue, a comment on an existing issue, or a Crisp note. Never more than one, never none.
+- Exactly one GitHub-side outcome per run: a new issue, a comment on an existing issue, or neither. Never both filing and commenting.
+- The Crisp note (step 5) always happens, regardless of which GitHub-side outcome occurred.
 - Never fabricate version numbers, error messages, or environment details the transcript doesn't actually contain.
 - If your confidence is genuinely low, say so in the confidence score rather than skipping the issue — a low-confidence tracked issue is more useful than silence, as long as it's honestly labeled as low-confidence.
