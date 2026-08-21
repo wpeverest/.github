@@ -17,9 +17,12 @@ function authHeader(creds) {
   return "Basic " + Buffer.from(`${creds.identifier}:${creds.key}`).toString("base64");
 }
 
+// Website Tokens (what we use -- generated directly in Settings > Workspace
+// Settings > Advanced configuration, no Marketplace account or approval
+// needed, unlike Plugin Tokens) require X-Crisp-Tier: website, not "plugin".
 export async function crispGet(creds, path) {
   const res = await fetch(`${CRISP_BASE}${path}`, {
-    headers: { Authorization: authHeader(creds), "X-Crisp-Tier": "plugin" },
+    headers: { Authorization: authHeader(creds), "X-Crisp-Tier": "website" },
   });
   if (!res.ok) throw new Error(`Crisp GET ${path} failed: ${res.status} ${await res.text()}`);
   return res.json();
@@ -30,7 +33,7 @@ export async function crispPost(creds, path, body) {
     method: "POST",
     headers: {
       Authorization: authHeader(creds),
-      "X-Crisp-Tier": "plugin",
+      "X-Crisp-Tier": "website",
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
