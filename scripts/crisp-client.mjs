@@ -55,6 +55,28 @@ export async function fetchResolvedConversationsSince(creds, sinceIso) {
   return conversations;
 }
 
+// Fetch every currently-active (not yet resolved) conversation, across
+// pages, capped at 5 pages (~100 conversations) -- bounds cost regardless of
+// how many tickets happen to be open at once. Used for the lightweight
+// dedupe-only check on active conversations (never files a new issue, only
+// flags a match against an already-tracked one), unlike the resolved-only
+// full investigate-and-file pipeline.
+// VERIFY: Crisp's docs describe filter_resolved and filter_not_resolved as
+// two separate params (not one true/false toggle) -- using the latter here.
+// Confirm against a real response before trusting this excludes resolved
+// conversations correctly.
+export async function fetchActiveConversations(creds) {
+  const conversations = [];
+  for (let page = 1; page <= 5; page++) {
+    const params = new URLSearchParams({ filter_not_resolved: "true" });
+    const { data } = await crispGet(creds, `/website/${creds.websiteId}/conversations/${page}?${params}`);
+    if (!data || data.length === 0) break;
+    conversations.push(...data);
+    if (data.length < 20) break;
+  }
+  return conversations;
+}
+
 // VERIFY: this assumes a conversation exposes its inbox as either `inbox_id`
 // at the top level, or as one of `meta.segments`. Log a real conversation
 // object and confirm/adjust before trusting the mapping.
