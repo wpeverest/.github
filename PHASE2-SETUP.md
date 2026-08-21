@@ -20,13 +20,22 @@ No Crisp token existed while writing this, so a few specifics are best-guesses f
 
 Do a manual dry run against one real resolved conversation before enabling the hourly schedule, and adjust these three spots if the real API disagrees with the docs.
 
-## 1. Crisp API token
+## 1. Crisp API tokens — one per account, not one total
 
-In Crisp: Settings → API → create a **Plugin Token** with conversation read and write scope (write is needed for the note-back-to-chat feature). This gives you an `identifier` and `key` pair, plus your website ID.
+`user-registration` and `themegrill` are on **separate Crisp accounts** (different logins), not just different inboxes under one account — confirmed directly, not assumed. That means **two independent Plugin Tokens**, created separately in each account, and credentials cannot be shared between them.
 
-Add:
-- Org secrets `CRISP_IDENTIFIER`, `CRISP_KEY`
-- **A repo variable** (not a secret) `CRISP_WEBSITE_ID` — it's an identifier, not a credential, and Phase 1 already taught us the cost of treating a non-secret as one: GitHub masks any string matching a secret's value everywhere it appears, including inside unrelated plain text. Repo variables: Settings → Secrets and variables → Actions → **Variables** tab.
+For **each** account: log into that account, go to Settings → API → create a **Plugin Token** with conversation read and write scope (write is needed for the note-back-to-chat feature). You'll get an `identifier`/`key` pair and a website ID.
+
+Naming convention — the account key (`USER_REGISTRATION`, `THEMEGRILL`, matching `config/inbox-to-repo.json`) must exactly match the suffix in these names:
+
+| Account | Secrets | Variable (not a secret) |
+|---|---|---|
+| User Registration | `CRISP_USER_REGISTRATION_IDENTIFIER`, `CRISP_USER_REGISTRATION_KEY` | `CRISP_USER_REGISTRATION_WEBSITE_ID` |
+| ThemeGrill | `CRISP_THEMEGRILL_IDENTIFIER`, `CRISP_THEMEGRILL_KEY` | `CRISP_THEMEGRILL_WEBSITE_ID` |
+
+The website ID is a plain **repo variable**, not a secret — it's an identifier, not a credential, and Phase 1 already taught us the cost of treating a non-secret as one: GitHub masks any string matching a secret's value everywhere it appears, including inside unrelated plain text. Repo variables: Settings → Secrets and variables → Actions → **Variables** tab.
+
+Onboarding a third Crisp account later means: create its token, add its three secrets/variable following the same naming convention, add its account key + inbox mappings to `config/inbox-to-repo.json`, and add its three lines to the `classify` job's `env:` block in the workflow (Stage 2 already resolves credentials dynamically by account, no workflow change needed there).
 
 ## 2. Model provider — currently OpenAI (swap later freely)
 

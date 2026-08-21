@@ -16,7 +16,12 @@
 // some names floating around as of writing (e.g. "GPT-5.6 Terra/Luna") come
 // from low-quality pricing-aggregator sites, not confirmed OpenAI docs.
 import { readFile, writeFile } from "node:fs/promises";
-import { fetchResolvedConversationsSince, getInboxKey, fetchTranscript } from "./crisp-client.mjs";
+import {
+  fetchResolvedConversationsSince,
+  getInboxKey,
+  fetchTranscript,
+  credsForAccount,
+} from "./crisp-client.mjs";
 
 const { OPENAI_API_KEY, CLASSIFY_MODEL, GITHUB_STEP_SUMMARY } = process.env;
 for (const [name, value] of Object.entries({ OPENAI_API_KEY, CLASSIFY_MODEL })) {
@@ -71,30 +76,37 @@ async function classify(transcript) {
 async function main() {
   const runStartedAt = new Date().toISOString();
   const cursor = JSON.parse(await readFile("state/cursor.json", "utf8"));
-  const inboxMap = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).inboxes;
-
-  const conversations = await fetchResolvedConversationsSince(cursor.last_checked);
-  console.log(`Fetched ${conversations.length} resolved conversations since ${cursor.last_checked}`);
+  const accounts = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).accounts;
 
   const matrix = [];
   const skippedUnmapped = [];
+  let totalFetched = 0;
 
-  for (const conversation of conversations) {
-    const inboxKey = getInboxKey(conversation);
-    const mapping = inboxKey && inboxMap[inboxKey];
-    if (!mapping) {
-      skippedUnmapped.push({ session_id: conversation.session_id, inboxKey });
-      continue;
-    }
+  // Two separate Crisp ACCOUNTS (different logins), not just different
+  // inboxes under one account -- each is fetched and classified independently.
+  for (const [accountKey, accountConfig] of Object.entries(accounts)) {
+    const creds = credsForAccount(accountKey);
+    const conversations = await fetchResolvedConversationsSince(creds, cursor.last_checked);
+    totalFetched += conversations.length;
+    console.log(`[${accountKey}] fetched ${conversations.length} resolved conversations since ${cursor.last_checked}`);
 
-    const transcript = await fetchTranscript(conversation.session_id);
-    if (!transcript.trim()) continue;
+    for (const conversation of conversations) {
+      const inboxKey = getInboxKey(conversation);
+      const mapping = inboxKey && accountConfig.inboxes[inboxKey];
+      if (!mapping) {
+        skippedUnmapped.push({ account: accountKey, session_id: conversation.session_id, inboxKey });
+        continue;
+      }
 
-    const { actionable, kind } = await classify(transcript);
-    console.log(`${conversation.session_id}: actionable=${actionable} kind=${kind}`);
+      const transcript = await fetchTranscript(creds, conversation.session_id);
+      if (!transcript.trim()) continue;
 
-    if (actionable && kind !== "none") {
-      matrix.push({ session_id: conversation.session_id, repo: mapping.repo, kind });
+      const { actionable, kind } = await classify(transcript);
+      console.log(`[${accountKey}] ${conversation.session_id}: actionable=${actionable} kind=${kind}`);
+
+      if (actionable && kind !== "none") {
+        matrix.push({ session_id: conversation.session_id, repo: mapping.repo, kind, account: accountKey });
+      }
     }
   }
 
@@ -105,11 +117,11 @@ async function main() {
     const lines = [
       `### Crisp triage — Stage 1`,
       ``,
-      `Fetched: ${conversations.length} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length}`,
+      `Fetched: ${totalFetched} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length}`,
     ];
     if (skippedUnmapped.length) {
       lines.push(``, `Unmapped inbox keys seen (add these to config/inbox-to-repo.json if real):`);
-      for (const s of skippedUnmapped) lines.push(`- \`${s.inboxKey}\` (session ${s.session_id})`);
+      for (const s of skippedUnmapped) lines.push(`- [${s.account}] \`${s.inboxKey}\` (session ${s.session_id})`);
     }
     await writeFile(GITHUB_STEP_SUMMARY, lines.join("\n") + "\n", { flag: "a" });
   }
