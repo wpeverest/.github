@@ -1,0 +1,80 @@
+# Lets any team member request a Copilot code review on a PR by commenting a
+# trigger phrase, even though only tg-autopilot holds a Copilot seat (paying
+# per-seat for 20+ team members was the thing being avoided). Works because
+# GitHub attributes the reviewer-request API call to whichever account's
+# token makes it -- tg-autopilot's, here -- regardless of who commented.
+name: Copilot review on comment
+
+on:
+  workflow_call:
+    inputs:
+      trigger-phrase:
+        description: 'Substring (case-insensitive) that, anywhere in a comment, requests a review.'
+        type: string
+        required: false
+        default: '@tg-autopilot review'
+      min-permission:
+        description: 'Minimum repo permission the commenter must have. One of: write, maintain, admin.'
+        type: string
+        required: false
+        default: 'write'
+    secrets:
+      BOT_TOKEN:
+        required: true
+
+jobs:
+  request-review:
+    # Only PR comments (issue_comment fires for both issues and PR conversation
+    # comments; github.event.issue.pull_request only exists on the PR case).
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, inputs.trigger-phrase)
+    runs-on: ubuntu-latest
+    steps:
+      # Anyone can comment on a public repo. Since each trigger spends
+      # tg-autopilot's own Copilot usage, only act for commenters who meet
+      # min-permission -- not just anyone passing by. The authorized decision
+      # is computed once here (rank comparison, "at least" semantics), so
+      # every later step just checks one plain boolean instead of repeating
+      # this logic.
+      - name: Check commenter's permission
+        id: perm
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          MIN_PERMISSION: ${{ inputs.min-permission }}
+        run: |
+          set -euo pipefail
+          LEVEL=$(gh api "repos/${{ github.repository }}/collaborators/${COMMENTER}/permission" --jq .permission)
+          echo "Commenter permission level: $LEVEL (need at least: $MIN_PERMISSION)"
+
+          rank() { case "$1" in admin) echo 4;; maintain) echo 3;; write) echo 2;; triage) echo 1;; *) echo 0;; esac; }
+
+          if [ "$(rank "$LEVEL")" -ge "$(rank "$MIN_PERMISSION")" ]; then
+            echo "authorized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: React to acknowledge
+        if: steps.perm.outputs.authorized == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content='eyes' --silent
+
+      - name: Request Copilot review
+        if: steps.perm.outputs.authorized == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          gh pr edit "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --add-reviewer @copilot
+
+      - name: Reply if not authorized
+        if: steps.perm.outputs.authorized == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -f body="@${{ github.event.comment.user.login }} only accounts with write access (or higher) can request a Copilot review this way."
