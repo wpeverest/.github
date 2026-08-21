@@ -96,8 +96,13 @@ concurrency:
 jobs:
   build:
     name: Build ZIP and comment
-    # Skip drafts, but always run a manual dispatch.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Skip drafts, but always run a manual dispatch. Skip fork PRs too: forks
+    # never get repo secrets, so BOT_TOKEN/ARTIFACTS_* are unset and the job
+    # would just fail loudly on the upload/comment steps.
+    if: |
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.draft == false &&
+       github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name)
     runs-on: ubuntu-latest
     steps:
       - name: Check out PR head
