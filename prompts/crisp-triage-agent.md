@@ -26,13 +26,28 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
    ```
    gh issue create --repo {{REPO}} --title "..." --label bug-report,bug-report-triage --body-file <path>
    ```
-   (use label `feature-request,bug-report-triage` for a feature). The issue body must include, as sections:
-   - **Summary** — plain-language statement of the defect/request
-   - **Customer context** — product/area, version, environment, if the transcript states them (do not invent details it doesn't contain)
-   - **Reproduction notes** — steps, and whether you reproduced it locally or are inferring from the transcript + code inspection alone
-   - **Diagnosis** — the actual code path, with `file:line` references, and what you found there
-   - **Confidence: NN/100** — your own honest estimate, not a rounded/default number
-   - **Source:** `[Crisp conversation]({{CONVERSATION_URL}})` at the end
+   (use label `feature-request,bug-report-triage` for a feature). Write the body file as actual markdown -- each section below is a real `##` heading in the file you write, not just plain text with the section name at the top of a paragraph:
+   ```markdown
+   ## Summary
+
+   Plain-language statement of the defect/request.
+
+   ## Customer context
+
+   Product/area, version, environment, if the transcript states them (do not invent details it doesn't contain).
+
+   ## Reproduction notes
+
+   Steps, and whether you reproduced it locally or are inferring from the transcript + code inspection alone.
+
+   ## Diagnosis
+
+   The actual code path, with `file:line` references, and what you found there.
+
+   **Confidence:** NN/100 -- your own honest estimate, not a rounded/default number.
+
+   **Source:** [Crisp conversation]({{CONVERSATION_URL}})
+   ```
 
 4. **If investigation concludes this is NOT a real product defect** (client-side misconfiguration, user error, already fixed, or you genuinely cannot substantiate it from the code) — **do not stay silent**. Post a short, factual note back into the support conversation so the team has a signal either way:
    ```
