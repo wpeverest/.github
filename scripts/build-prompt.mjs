@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// Substitutes {{REPO}}, {{KIND}}, {{SESSION_ID}}, {{TRANSCRIPT}} into the
-// Stage 2 prompt template and prints the result to stdout.
+// Substitutes {{REPO}}, {{KIND}}, {{SESSION_ID}}, {{CONVERSATION_URL}},
+// {{TRANSCRIPT}} into the Stage 2 prompt template and prints the result to
+// stdout.
 import { readFile } from "node:fs/promises";
 
-const [templatePath, repo, kind, sessionId, transcriptPath] = process.argv.slice(2);
-if (!templatePath || !repo || !kind || !sessionId || !transcriptPath) {
+const [templatePath, repo, kind, sessionId, conversationUrl, transcriptPath] = process.argv.slice(2);
+if (!templatePath || !repo || !kind || !sessionId || !conversationUrl || !transcriptPath) {
   console.error(
-    "Usage: build-prompt.mjs <template.md> <repo> <kind> <session_id> <transcript.txt>"
+    "Usage: build-prompt.mjs <template.md> <repo> <kind> <session_id> <conversation_url> <transcript.txt>"
   );
   process.exit(1);
 }
@@ -24,6 +25,7 @@ const filled = template
   .replaceAll("{{REPO}}", repo)
   .replaceAll("{{KIND}}", kind)
   .replaceAll("{{SESSION_ID}}", sessionId)
+  .replaceAll("{{CONVERSATION_URL}}", conversationUrl)
   .replaceAll("{{TRANSCRIPT}}", transcript);
 
 process.stdout.write(filled);

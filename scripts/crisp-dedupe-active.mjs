@@ -17,6 +17,7 @@ import {
   fetchTranscript,
   postNote,
   credsForAccount,
+  conversationUrl,
 } from "./crisp-client.mjs";
 import { chatJSON } from "./openai-client.mjs";
 import { listOpenIssues, commentOnIssue } from "./github-client.mjs";
@@ -103,7 +104,7 @@ async function main() {
       await commentOnIssue(
         repo,
         match.number,
-        `Another user appears to be hitting this same issue.\n\nSource: Crisp conversation ${conversation.session_id}`
+        `Another user appears to be hitting this same issue.\n\nSource: [Crisp conversation](${conversationUrl(creds, conversation.session_id)})`
       );
       await postNote(
         creds,
