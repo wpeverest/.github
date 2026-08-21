@@ -1,0 +1,141 @@
+# Phase 2: Crisp -> AI -> GitHub issue.
+#
+# Hourly: fetch resolved Crisp conversations since the last run, cheaply
+# classify each (Stage 1), then for anything actionable, check out the mapped
+# repo and let an agent (OpenCode CLI) investigate, dedupe against existing
+# issues, file a new one, or leave a note in the Crisp conversation if it
+# turns out not to be a real product defect (Stage 2).
+#
+# No server: Stage 2's `opencode run` is a blocking CLI call inside the job,
+# not a persistent process -- same zero-infra pattern as Phase 1.
+name: Crisp triage
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: crisp-triage
+  cancel-in-progress: false # never cancel a mid-flight triage run
+
+jobs:
+  classify:
+    name: Fetch and classify conversations
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.classify.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BOT_TOKEN }} # needs contents:write here to commit the advanced cursor
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Classify
+        id: classify
+        env:
+          CRISP_IDENTIFIER: ${{ secrets.CRISP_IDENTIFIER }}
+          CRISP_KEY: ${{ secrets.CRISP_KEY }}
+          CRISP_WEBSITE_ID: ${{ vars.CRISP_WEBSITE_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Verify against platform.openai.com/docs/models before trusting this default.
+          CLASSIFY_MODEL: ${{ vars.CLASSIFY_MODEL || 'gpt-5-mini' }}
+        run: |
+          node scripts/crisp-classify.mjs
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit advanced cursor
+        run: |
+          git config user.name "tg-autopilot"
+          git config user.email "tg-autopilot@users.noreply.github.com"
+          git add state/cursor.json
+          git diff --cached --quiet || git commit -m "Advance Crisp triage cursor [skip ci]"
+          git push
+
+  investigate:
+    name: Investigate (${{ matrix.session_id }})
+    needs: classify
+    if: needs.classify.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.classify.outputs.matrix) }}
+    steps:
+      - name: Check out bot tooling
+        uses: actions/checkout@v4
+        with:
+          path: .bot-tools
+
+      - name: Check out target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repo }}
+          token: ${{ secrets.BOT_TOKEN }}
+          path: workspace
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install OpenCode CLI
+        run: npm install -g opencode-ai
+
+      - name: Place Crisp note-posting helper (kept outside the repo tree, no name collision)
+        run: |
+          mkdir -p /tg-autopilot
+          cp .bot-tools/scripts/crisp-post-note.mjs /tg-autopilot/crisp-post-note.mjs
+
+      - name: Re-fetch this conversation's transcript
+        id: transcript
+        env:
+          CRISP_IDENTIFIER: ${{ secrets.CRISP_IDENTIFIER }}
+          CRISP_KEY: ${{ secrets.CRISP_KEY }}
+          CRISP_WEBSITE_ID: ${{ vars.CRISP_WEBSITE_ID }}
+        run: |
+          node .bot-tools/scripts/crisp-fetch-transcript.mjs "${{ matrix.session_id }}" > transcript.txt
+          echo "path=$PWD/transcript.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Build the agent prompt
+        id: prompt
+        run: |
+          node .bot-tools/scripts/build-prompt.mjs \
+            .bot-tools/prompts/crisp-triage-agent.md \
+            "${{ matrix.repo }}" "${{ matrix.kind }}" "${{ matrix.session_id }}" "${{ steps.transcript.outputs.path }}" \
+            > prompt.md
+          echo "path=$PWD/prompt.md" >> "$GITHUB_OUTPUT"
+
+      # OpenCode's env-var auto-detection is only confirmed (in their docs)
+      # for Anthropic. For OpenAI, write an explicit provider config using the
+      # same `{env:VAR}` substitution syntax that IS documented, rather than
+      # assume auto-detection also covers it.
+      - name: Configure OpenCode's OpenAI provider
+        working-directory: workspace
+        run: |
+          cat > opencode.json <<'JSON'
+          {
+            "provider": {
+              "openai": {
+                "options": { "apiKey": "{env:OPENAI_API_KEY}" }
+              }
+            }
+          }
+          JSON
+
+      - name: Investigate and act
+        working-directory: workspace
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CRISP_IDENTIFIER: ${{ secrets.CRISP_IDENTIFIER }}
+          CRISP_KEY: ${{ secrets.CRISP_KEY }}
+          CRISP_WEBSITE_ID: ${{ vars.CRISP_WEBSITE_ID }}
+        run: |
+          opencode run "$(cat "${{ steps.prompt.outputs.path }}")" \
+            --model "openai/${{ vars.INVESTIGATE_MODEL || 'gpt-5-mini' }}" \
+            --auto \
+            --format json \
+            | tee "$GITHUB_STEP_SUMMARY"
