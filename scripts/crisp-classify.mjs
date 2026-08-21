@@ -84,8 +84,16 @@ async function main() {
 
   // Two separate Crisp ACCOUNTS (different logins), not just different
   // inboxes under one account -- each is fetched and classified independently.
+  // An account not yet credentialed (e.g. still awaiting access) is skipped
+  // with a warning rather than crashing the whole run.
   for (const [accountKey, accountConfig] of Object.entries(accounts)) {
-    const creds = credsForAccount(accountKey);
+    let creds;
+    try {
+      creds = credsForAccount(accountKey);
+    } catch (err) {
+      console.warn(`[${accountKey}] skipping: ${err.message}`);
+      continue;
+    }
     const conversations = await fetchResolvedConversationsSince(creds, cursor.last_checked);
     totalFetched += conversations.length;
     console.log(`[${accountKey}] fetched ${conversations.length} resolved conversations since ${cursor.last_checked}`);
