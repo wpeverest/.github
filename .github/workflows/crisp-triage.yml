@@ -37,9 +37,16 @@ jobs:
       - name: Classify
         id: classify
         env:
-          CRISP_IDENTIFIER: ${{ secrets.CRISP_IDENTIFIER }}
-          CRISP_KEY: ${{ secrets.CRISP_KEY }}
-          CRISP_WEBSITE_ID: ${{ vars.CRISP_WEBSITE_ID }}
+          # Two separate Crisp accounts (different logins), each with its own
+          # credential set -- see config/inbox-to-repo.json for how the
+          # account keys below (USER_REGISTRATION, THEMEGRILL) map to repos.
+          # Add a new triple here whenever a new Crisp account is onboarded.
+          CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
+          CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
+          CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
+          CRISP_THEMEGRILL_IDENTIFIER: ${{ secrets.CRISP_THEMEGRILL_IDENTIFIER }}
+          CRISP_THEMEGRILL_KEY: ${{ secrets.CRISP_THEMEGRILL_KEY }}
+          CRISP_THEMEGRILL_WEBSITE_ID: ${{ vars.CRISP_THEMEGRILL_WEBSITE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # Verify against platform.openai.com/docs/models before trusting this default.
           CLASSIFY_MODEL: ${{ vars.CLASSIFY_MODEL || 'gpt-5-mini' }}
@@ -92,9 +99,13 @@ jobs:
       - name: Re-fetch this conversation's transcript
         id: transcript
         env:
-          CRISP_IDENTIFIER: ${{ secrets.CRISP_IDENTIFIER }}
-          CRISP_KEY: ${{ secrets.CRISP_KEY }}
-          CRISP_WEBSITE_ID: ${{ vars.CRISP_WEBSITE_ID }}
+          # Dynamic lookup by matrix.account (e.g. "USER_REGISTRATION") --
+          # each conversation's matrix entry says which Crisp account it came
+          # from, so we resolve that account's specific credentials here
+          # rather than assuming a single global Crisp account.
+          CRISP_IDENTIFIER: ${{ secrets[format('CRISP_{0}_IDENTIFIER', matrix.account)] }}
+          CRISP_KEY: ${{ secrets[format('CRISP_{0}_KEY', matrix.account)] }}
+          CRISP_WEBSITE_ID: ${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}
         run: |
           node .bot-tools/scripts/crisp-fetch-transcript.mjs "${{ matrix.session_id }}" > transcript.txt
           echo "path=$PWD/transcript.txt" >> "$GITHUB_OUTPUT"
@@ -130,9 +141,9 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GH_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CRISP_IDENTIFIER: ${{ secrets.CRISP_IDENTIFIER }}
-          CRISP_KEY: ${{ secrets.CRISP_KEY }}
-          CRISP_WEBSITE_ID: ${{ vars.CRISP_WEBSITE_ID }}
+          CRISP_IDENTIFIER: ${{ secrets[format('CRISP_{0}_IDENTIFIER', matrix.account)] }}
+          CRISP_KEY: ${{ secrets[format('CRISP_{0}_KEY', matrix.account)] }}
+          CRISP_WEBSITE_ID: ${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}
         run: |
           opencode run "$(cat "${{ steps.prompt.outputs.path }}")" \
             --model "openai/${{ vars.INVESTIGATE_MODEL || 'gpt-5-mini' }}" \

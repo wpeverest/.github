@@ -1,9 +1,20 @@
 {
-  "_comment": "Map each Crisp inbox/segment to the GitHub repo it should be investigated against. Fill in real inbox IDs before Phase 2 can run -- an unmapped conversation is skipped, not guessed at. Find inbox IDs via GET https://api.crisp.chat/v1/website/{website_id}/settings (or the Crisp dashboard: Settings -> Inbox -> the inbox's ID appears in its URL/settings).",
-  "_format": "one entry per inbox_id: { \"repo\": \"org/repo\" }",
-  "inboxes": {
-    "REPLACE_WITH_REAL_INBOX_ID": {
-      "repo": "wpeverest/user-registration"
+  "_comment": "Two separate Crisp ACCOUNTS (different logins/billing), not just different inboxes under one account. Each top-level key here must exactly match the suffix used in that account's secrets/variable names: CRISP_<KEY>_IDENTIFIER, CRISP_<KEY>_KEY (both secrets), CRISP_<KEY>_WEBSITE_ID (a variable, not a secret). Use this exact uppercase-with-underscores form, since GitHub Actions expressions have no case-conversion helper to derive it automatically.",
+  "_format": "accounts.<ACCOUNT_KEY>.inboxes.<inbox_id> = { repo }",
+  "accounts": {
+    "USER_REGISTRATION": {
+      "inboxes": {
+        "REPLACE_WITH_REAL_INBOX_ID": {
+          "repo": "wpeverest/user-registration"
+        }
+      }
+    },
+    "THEMEGRILL": {
+      "inboxes": {
+        "REPLACE_WITH_REAL_INBOX_ID": {
+          "repo": "themegrill/REPLACE_WITH_REAL_REPO"
+        }
+      }
     }
   }
 }

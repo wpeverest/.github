@@ -11,5 +11,11 @@ if (!sessionId) {
   process.exit(1);
 }
 
-const transcript = await fetchTranscript(sessionId);
+const creds = {
+  identifier: process.env.CRISP_IDENTIFIER,
+  key: process.env.CRISP_KEY,
+  websiteId: process.env.CRISP_WEBSITE_ID,
+};
+
+const transcript = await fetchTranscript(creds, sessionId);
 process.stdout.write(transcript);

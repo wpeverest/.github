@@ -11,7 +11,13 @@ if (!sessionId || !note) {
   process.exit(1);
 }
 
-postNote(sessionId, note)
+const creds = {
+  identifier: process.env.CRISP_IDENTIFIER,
+  key: process.env.CRISP_KEY,
+  websiteId: process.env.CRISP_WEBSITE_ID,
+};
+
+postNote(creds, sessionId, note)
   .then(() => console.log(`Note posted to conversation ${sessionId}`))
   .catch((err) => {
     console.error(`Failed to post Crisp note: ${err.message}`);
