@@ -157,9 +157,13 @@ jobs:
         run: composer install --prefer-dist --no-interaction --no-progress
 
       - name: Install JS dependencies
+        # eval, not a bare interpolation: when install-command is unset this
+        # renders as `eval ""`, a real no-op statement -- interpolating it
+        # directly would render as a blank line, an empty if-body, which bash
+        # treats as a syntax error ("unexpected token `elif'").
         run: |
           if [ -n "${{ inputs.install-command }}" ]; then
-            ${{ inputs.install-command }}
+            eval "${{ inputs.install-command }}"
           elif [ "${{ inputs.package-manager }}" = "npm" ]; then
             npm ci
           elif [ "${{ inputs.package-manager }}" = "pnpm" ]; then
