@@ -109,7 +109,7 @@ async function main() {
       await postNote(
         creds,
         conversation.session_id,
-        `This looks like a known tracked issue: ${issueUrl} -- our team is already looking into it.`
+        `This looks like a known tracked issue: ${issueUrl}`
       );
       notified.add(conversation.session_id);
       console.log(`[${accountKey}] ${conversation.session_id}: matched ${repo}#${match.number}`);
