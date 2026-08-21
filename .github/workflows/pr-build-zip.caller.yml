@@ -16,6 +16,7 @@ jobs:
       php-version: '7.4'
       build-command: yarn build && yarn build:blocks && gulp release
       zip-glob: 'release/*.zip'
+      artifacts-bucket: themegrill-pr-artifacts
       public-base-url: https://themegrill-pr-artifacts.s3.amazonaws.com
       s3-region: us-east-1
       # For Cloudflare R2, use instead:
