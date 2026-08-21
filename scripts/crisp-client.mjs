@@ -10,6 +10,13 @@
 // single "the" set of Crisp env vars to read globally.
 const CRISP_BASE = "https://api.crisp.chat/v1";
 
+// VERIFY: this operator-dashboard URL pattern is a commonly-referenced
+// format, not confirmed against Crisp's own docs. Test that it actually
+// opens the right conversation before trusting it in issues/comments.
+export function conversationUrl(creds, sessionId) {
+  return `https://app.crisp.chat/website/${creds.websiteId}/inbox/${sessionId}/`;
+}
+
 function authHeader(creds) {
   if (!creds?.identifier || !creds?.key) {
     throw new Error("Crisp credentials missing identifier/key");

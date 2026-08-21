@@ -135,10 +135,17 @@ jobs:
 
       - name: Build the agent prompt
         id: prompt
+        env:
+          # VERIFY: commonly-referenced dashboard URL pattern, not confirmed
+          # against Crisp's own docs -- same caveat as conversationUrl() in
+          # scripts/crisp-client.mjs (which this duplicates, since the URL is
+          # simple string interpolation and doesn't need the shared module
+          # loaded into a YAML step).
+          CONVERSATION_URL: https://app.crisp.chat/website/${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}/inbox/${{ matrix.session_id }}/
         run: |
           node .bot-tools/scripts/build-prompt.mjs \
             .bot-tools/prompts/crisp-triage-agent.md \
-            "${{ matrix.repo }}" "${{ matrix.kind }}" "${{ matrix.session_id }}" "${{ steps.transcript.outputs.path }}" \
+            "${{ matrix.repo }}" "${{ matrix.kind }}" "${{ matrix.session_id }}" "$CONVERSATION_URL" "${{ steps.transcript.outputs.path }}" \
             > prompt.md
           echo "path=$PWD/prompt.md" >> "$GITHUB_OUTPUT"
 
