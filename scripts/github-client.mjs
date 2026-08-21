@@ -9,11 +9,19 @@ export function ghTokenForRepo(repo) {
   return repo.startsWith("themegrill/") ? process.env.BOT_TOKEN_THEMEGRILL : process.env.BOT_TOKEN;
 }
 
+// Restricted to our own AI-filed issues (labeled bug-report-triage), not
+// every open issue in the repo. Matching against generic pre-existing
+// community threads that were never really bugs produced a real false
+// positive (a vague "no updates in months?" discussion issue) that posted a
+// wrong comment and a wrong note into a real customer's chat. The tradeoff:
+// this can't catch a duplicate against a genuine bug that predates this
+// system and was never labeled -- accepted as the safer default.
 export async function listOpenIssues(repo) {
   const token = ghTokenForRepo(repo);
-  const res = await fetch(`https://api.github.com/repos/${repo}/issues?state=open&per_page=100`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
-  });
+  const res = await fetch(
+    `https://api.github.com/repos/${repo}/issues?state=open&labels=bug-report-triage&per_page=100`,
+    { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } }
+  );
   if (!res.ok) throw new Error(`GitHub list issues failed for ${repo}: ${res.status} ${await res.text()}`);
   const issues = await res.json();
   return issues.filter((i) => !i.pull_request); // /issues also returns PRs
