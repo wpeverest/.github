@@ -12,7 +12,7 @@
     "THEMEGRILL": {
       "inboxes": {
         "REPLACE_WITH_REAL_INBOX_ID": {
-          "repo": "themegrill/REPLACE_WITH_REAL_REPO"
+          "repo": "wpeverest/themegrill-issues"
         }
       }
     }
