@@ -35,7 +35,7 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
 
 4. **If investigation concludes this is NOT a real product defect** (client-side misconfiguration, user error, already fixed, or you genuinely cannot substantiate it from the code) — **do not stay silent**. Post a short, factual note back into the support conversation so the team has a signal either way:
    ```
-   node /tg-autopilot/crisp-post-note.mjs {{SESSION_ID}} "<one or two sentence explanation of why this doesn't look like a product bug>"
+   node "$HOME/tg-autopilot/crisp-post-note.mjs" {{SESSION_ID}} "<one or two sentence explanation of why this doesn't look like a product bug>"
    ```
    Do this instead of filing an issue, not in addition to one.
 

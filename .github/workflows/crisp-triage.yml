@@ -94,10 +94,13 @@ jobs:
       - name: Install OpenCode CLI
         run: npm install -g opencode-ai
 
+      # $HOME, not /tg-autopilot: the runner user can't write to filesystem
+      # root ("mkdir: cannot create directory '/tg-autopilot': Permission
+      # denied"). $HOME is always writable and still outside the repo tree.
       - name: Place Crisp note-posting helper (kept outside the repo tree, no name collision)
         run: |
-          mkdir -p /tg-autopilot
-          cp .bot-tools/scripts/crisp-post-note.mjs /tg-autopilot/crisp-post-note.mjs
+          mkdir -p "$HOME/tg-autopilot"
+          cp .bot-tools/scripts/crisp-post-note.mjs "$HOME/tg-autopilot/crisp-post-note.mjs"
 
       - name: Re-fetch this conversation's transcript
         id: transcript
