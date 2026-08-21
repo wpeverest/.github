@@ -203,6 +203,10 @@ jobs:
           echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
           echo "size=$(du -h "$ZIP" | cut -f1)" >> "$GITHUB_OUTPUT"
 
+      # Keyed by branch, not commit SHA: each new push to the same PR overwrites
+      # the same object instead of piling up a fresh one per push. A PR with 20
+      # commits leaves exactly one zip in the bucket, not 20 waiting on the
+      # 30-day lifecycle rule to clean them up.
       - name: Compute storage key
         id: key
         env:
@@ -214,7 +218,7 @@ jobs:
           PREFIX="${{ inputs.artifact-prefix }}"
           [ -n "$PREFIX" ] || PREFIX="${{ github.event.repository.name }}"
           echo "sha8=$SHA8" >> "$GITHUB_OUTPUT"
-          echo "dir=${PREFIX}-${BRANCH}-${SHA8}" >> "$GITHUB_OUTPUT"
+          echo "dir=${PREFIX}-${BRANCH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload ZIP to object storage
         id: upload
