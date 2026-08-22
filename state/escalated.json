@@ -8,7 +8,7 @@
     "manualNoteCount": 0
   },
   "session_0416953c-6ff6-4b6f-8fee-3840391a27ac": {
-    "autoEscalated": false,
+    "autoEscalated": true,
     "manualNoteCount": 1
   },
   "session_f118221b-70c5-4f48-834b-9442e39ac81b": {
@@ -700,6 +700,10 @@
     "manualNoteCount": 0
   },
   "session_224d024b-820b-430c-b51c-a77a0cf04cab": {
+    "autoEscalated": true,
+    "manualNoteCount": 0
+  },
+  "session_033e55e3-ab86-4d41-b388-48bbddd9e322": {
     "autoEscalated": true,
     "manualNoteCount": 0
   }
