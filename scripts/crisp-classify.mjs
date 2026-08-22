@@ -207,17 +207,22 @@ async function main() {
     // matrix.json this run (see its own skip logic).
     //
     // Real cost/perf fix: don't fetch every conversation's full message
-    // history just to check for a manual note. fetchActiveConversations
-    // already sorts most-recently-updated first, and adding a note IS an
-    // update -- so a fresh trigger note is guaranteed to land within the
-    // first couple of pages, never buried in a 400-conversation backlog.
-    // The staleness check below needs no message fetch at all (the
+    // history just to check for a manual note -- only conversations actually
+    // touched since the last run could possibly have a new one. cursor.last_
+    // checked already marks exactly that boundary (it's this same script's
+    // own "last time I ran" timestamp, read at the top of main() before this
+    // run advances it), and adding a note IS an update, so comparing each
+    // conversation's own active.last against it is an exact test, not a
+    // guess -- replaces the previous fixed "check the top 40" heuristic,
+    // which paid a flat cost every run regardless of how little had actually
+    // changed. The staleness check below needs no message fetch at all (the
     // conversation list already carries active.last/created_at); a full
     // fetch only happens for whichever check actually looks worth pursuing.
+    const lastCheckedMs = new Date(cursor.last_checked).getTime();
     const activeConversations = await fetchActiveConversations(creds);
-    const MANUAL_TRIGGER_SCAN_LIMIT = 40; // ~2 pages, given the recency sort
-    activeConversations.forEach((conversation, index) => {
-      conversation._checkManualNote = index < MANUAL_TRIGGER_SCAN_LIMIT;
+    activeConversations.forEach((conversation) => {
+      const lastActiveAt = conversation.active?.last ?? conversation.created_at;
+      conversation._checkManualNote = lastActiveAt > lastCheckedMs;
     });
 
     for (const conversation of activeConversations) {
