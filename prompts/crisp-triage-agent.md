@@ -18,7 +18,9 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
    ```
    gh issue list --repo {{REPO}} --state open --search "<relevant keywords>"
    ```
-   If you find a genuine match:
+   If you find a genuine match, **first check whether that issue's own `Source:` line already references this exact conversation** (`{{SESSION_ID}}` or `{{CONVERSATION_URL}}`) -- if so, this conversation is not a recurrence, it's the one that caused this issue in the first place. Skip commenting entirely in that case; it's neither a new issue nor a duplicate.
+
+   Otherwise, if it's a genuine match from a *different* conversation:
    - Comment on it noting this is a recurrence, briefly stating what this conversation adds, and linking `[Crisp conversation]({{CONVERSATION_URL}})` as the source (do not repeat the full diagnosis if the issue already has one).
    - Also leave a note back in the support conversation (step 5 below) linking that existing issue, so the team has a signal even though nothing new was filed.
    - Stop here. Do not file a new issue for something already tracked.

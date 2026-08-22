@@ -99,6 +99,18 @@ async function main() {
       const match = await findMatchingIssue(transcript, issues);
       if (!match) continue;
 
+      // The matched issue can be the one THIS same conversation originally
+      // caused -- a still-open conversation gets re-scanned every hour and
+      // will otherwise match back to its own issue, producing a false
+      // "another user is hitting this" comment on a conversation that IS
+      // the source. Confirmed for real: session_f118221b matched back to
+      // colormag#293, which its own Source: line said it had filed.
+      if ((match.body ?? "").includes(conversation.session_id)) {
+        notified.add(conversation.session_id);
+        console.log(`[${accountKey}] ${conversation.session_id}: matched ${repo}#${match.number} but it's the issue's own source -- skipping`);
+        continue;
+      }
+
       matched++;
       const issueUrl = `https://github.com/${repo}/issues/${match.number}`;
       await commentOnIssue(
