@@ -27,6 +27,15 @@ export async function listOpenIssues(repo) {
   return issues.filter((i) => !i.pull_request); // /issues also returns PRs
 }
 
+export async function listIssueComments(repo, number) {
+  const token = ghTokenForRepo(repo);
+  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${number}/comments?per_page=100`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) throw new Error(`GitHub list comments failed on ${repo}#${number}: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
 export async function commentOnIssue(repo, number, body) {
   const token = ghTokenForRepo(repo);
   const res = await fetch(`https://api.github.com/repos/${repo}/issues/${number}/comments`, {

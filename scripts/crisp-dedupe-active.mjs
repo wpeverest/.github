@@ -20,7 +20,7 @@ import {
   conversationUrl,
 } from "./crisp-client.mjs";
 import { chatJSON } from "./openai-client.mjs";
-import { listOpenIssues, commentOnIssue } from "./github-client.mjs";
+import { listOpenIssues, listIssueComments, commentOnIssue } from "./github-client.mjs";
 
 const { GITHUB_STEP_SUMMARY } = process.env;
 
@@ -117,6 +117,27 @@ async function main() {
       if ((match.body ?? "").includes(conversation.session_id)) {
         notified.add(conversation.session_id);
         console.log(`[${accountKey}] ${conversation.session_id}: matched ${repo}#${match.number} but it's the issue's own source -- skipping`);
+        continue;
+      }
+
+      // state/active-notified.json is meant to stop this exact repeat, but
+      // it's committed via a racy git rebase (crisp-triage.yml's "Commit
+      // advanced state" step uses `-X ours`, which can silently drop an
+      // earlier run's addition on conflict -- an accepted risk there,
+      // documented as "rare"). Confirmed for real: three back-to-back runs
+      // today all lost the race and each posted its own recurrence comment
+      // on themegrill/colormag-pro#296 for the same still-open conversation.
+      // A note repeating in Crisp is low-cost noise; three duplicate
+      // "another user hit this" comments on a real issue is not -- so guard
+      // the comment specifically against GitHub's own state, which has no
+      // such race, rather than trusting the git-committed file alone.
+      const existingComments = await listIssueComments(repo, match.number);
+      const alreadyCommented = existingComments.some((c) =>
+        (c.body ?? "").includes(conversation.session_id)
+      );
+      if (alreadyCommented) {
+        notified.add(conversation.session_id);
+        console.log(`[${accountKey}] ${conversation.session_id}: already commented on ${repo}#${match.number} -- skipping duplicate comment`);
         continue;
       }
 
