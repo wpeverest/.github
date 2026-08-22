@@ -205,12 +205,23 @@ async function main() {
     // Deliberately independent of the lightweight dedupe-only check in
     // crisp-dedupe-active.mjs, which skips anything that ends up in
     // matrix.json this run (see its own skip logic).
+    //
+    // Real cost/perf fix: don't fetch every conversation's full message
+    // history just to check for a manual note. fetchActiveConversations
+    // already sorts most-recently-updated first, and adding a note IS an
+    // update -- so a fresh trigger note is guaranteed to land within the
+    // first couple of pages, never buried in a 400-conversation backlog.
+    // The staleness check below needs no message fetch at all (the
+    // conversation list already carries active.last/created_at); a full
+    // fetch only happens for whichever check actually looks worth pursuing.
     const activeConversations = await fetchActiveConversations(creds);
+    const MANUAL_TRIGGER_SCAN_LIMIT = 40; // ~2 pages, given the recency sort
+    activeConversations.forEach((conversation, index) => {
+      conversation._checkManualNote = index < MANUAL_TRIGGER_SCAN_LIMIT;
+    });
+
     for (const conversation of activeConversations) {
       const record = escalated[conversation.session_id] ?? { autoEscalated: false, manualNoteCount: 0 };
-      const messages = await fetchRawMessages(creds, conversation.session_id);
-      const manualNoteCount = countManualTriggerNotes(messages);
-      const hasNewManualNote = manualNoteCount > record.manualNoteCount;
 
       // active.last, not created_at: a thread resolved once and reopened
       // weeks later by a returning customer would otherwise read as "50
@@ -218,10 +229,17 @@ async function main() {
       // just started. active.last reflects the latter, and correctly gives
       // a reactivated thread a fresh AUTO_ESCALATE_HOURS grace period too --
       // the same restraint we want for a genuinely brand-new conversation.
+      // No message fetch needed for this check -- pure conversation metadata.
       const lastActiveAt = conversation.active?.last ?? conversation.created_at;
       const staleHours = (Date.now() - lastActiveAt) / (1000 * 60 * 60);
       const eligibleForAutoEscalate =
         !record.autoEscalated && staleHours >= AUTO_ESCALATE_HOURS && staleHours <= AUTO_ESCALATE_MAX_HOURS;
+
+      if (!conversation._checkManualNote && !eligibleForAutoEscalate) continue;
+
+      const messages = await fetchRawMessages(creds, conversation.session_id);
+      const manualNoteCount = conversation._checkManualNote ? countManualTriggerNotes(messages) : record.manualNoteCount;
+      const hasNewManualNote = manualNoteCount > record.manualNoteCount;
 
       if (!hasNewManualNote && !eligibleForAutoEscalate) continue;
 
