@@ -9,11 +9,20 @@
 // Also escalates a still-open (active) conversation straight to full
 // investigation in two cases, without waiting for it to resolve:
 //   - a private note asks for it explicitly: "@tg-autopilot investigate"
-//   - it's been open more than AUTO_ESCALATE_HOURS and the cheap classifier
-//     agrees it looks like a real bug/feature -- fires at most ONCE per
-//     conversation automatically; a fresh manual note can always re-trigger,
-//     but the time-based rule never repeats on its own (real investigation
-//     cost, not worth re-spending hourly on the same still-open ticket).
+//   - it's been open between AUTO_ESCALATE_HOURS and AUTO_ESCALATE_MAX_HOURS,
+//     and the cheap classifier agrees it looks like a real bug/feature --
+//     fires at most ONCE per conversation automatically; a fresh manual note
+//     can always re-trigger, but the time-based rule never repeats on its
+//     own (real investigation cost, not worth re-spending hourly on the same
+//     still-open ticket).
+//
+//     The upper bound matters for real reasons, not just symmetry: this
+//     account has a genuine backlog of conversations abandoned/never closed
+//     for 100+ days. Auto-escalating something that stale blind is a bad
+//     default -- confirmed for real, a widened fetch page cap surfaced a
+//     conversation open 2548h (~106 days) that auto-escalated on the spot.
+//     Past the ceiling, only a human's manual "@tg-autopilot investigate"
+//     note escalates it -- a deliberate decision, not a blind timer.
 //
 // Writes:
 //   - matrix.json: actionable conversations for Stage 2 to investigate
@@ -43,6 +52,7 @@ import { chatJSON } from "./openai-client.mjs";
 
 const { GITHUB_STEP_SUMMARY } = process.env;
 const AUTO_ESCALATE_HOURS = 12;
+const AUTO_ESCALATE_MAX_HOURS = 24 * 30; // 30 days -- past this, only a manual note escalates it
 
 // For a single-product (or Crisp-tagged-inbox) account: just actionable/kind.
 async function classify(transcript) {
@@ -202,8 +212,16 @@ async function main() {
       const manualNoteCount = countManualTriggerNotes(messages);
       const hasNewManualNote = manualNoteCount > record.manualNoteCount;
 
-      const ageHours = (Date.now() - conversation.created_at) / (1000 * 60 * 60);
-      const eligibleForAutoEscalate = !record.autoEscalated && ageHours >= AUTO_ESCALATE_HOURS;
+      // active.last, not created_at: a thread resolved once and reopened
+      // weeks later by a returning customer would otherwise read as "50
+      // days old" by creation time, when the current unresolved period only
+      // just started. active.last reflects the latter, and correctly gives
+      // a reactivated thread a fresh AUTO_ESCALATE_HOURS grace period too --
+      // the same restraint we want for a genuinely brand-new conversation.
+      const lastActiveAt = conversation.active?.last ?? conversation.created_at;
+      const staleHours = (Date.now() - lastActiveAt) / (1000 * 60 * 60);
+      const eligibleForAutoEscalate =
+        !record.autoEscalated && staleHours >= AUTO_ESCALATE_HOURS && staleHours <= AUTO_ESCALATE_MAX_HOURS;
 
       if (!hasNewManualNote && !eligibleForAutoEscalate) continue;
 
@@ -229,7 +247,7 @@ async function main() {
         if (result.repo && result.actionable && result.kind !== "none") {
           matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
           autoEscalations++;
-          console.log(`[${accountKey}] ${conversation.session_id}: open ${ageHours.toFixed(1)}h, classifier agrees -> escalated to ${result.repo}`);
+          console.log(`[${accountKey}] ${conversation.session_id}: stale ${staleHours.toFixed(1)}h, classifier agrees -> escalated to ${result.repo}`);
         }
       }
 
@@ -246,7 +264,7 @@ async function main() {
       `### Crisp triage — Stage 1`,
       ``,
       `Fetched: ${totalFetched} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled}`,
-      `Escalated from active: ${manualEscalations} manual, ${autoEscalations} auto (open ${AUTO_ESCALATE_HOURS}h+)`,
+      `Escalated from active: ${manualEscalations} manual, ${autoEscalations} auto (stale ${AUTO_ESCALATE_HOURS}h–${AUTO_ESCALATE_MAX_HOURS}h)`,
     ];
     if (skippedUnmapped.length) {
       lines.push(``, `Unmapped inbox keys / unidentified products seen (add these to config/inbox-to-repo.json if real):`);
