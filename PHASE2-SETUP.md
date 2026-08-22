@@ -10,16 +10,6 @@ Files added for this phase, all in `wpeverest/.github`:
 - `state/cursor.json` — persisted "last checked" timestamp
 - `config/inbox-to-repo.json` — Crisp inbox → GitHub repo mapping (**you must populate this**)
 
-## ⚠️ Not yet verified against a live Crisp account
-
-No Crisp token existed while writing this, so a few specifics are best-guesses from Crisp's public API docs, marked `VERIFY:` in the code:
-
-1. **How a conversation exposes its inbox/segment** (`getInboxKey()` in `crisp-client.mjs`). Log one real conversation object from `fetchResolvedConversationsSince()` and confirm the actual field before trusting the repo mapping.
-2. **The exact messages-fetch endpoint path** (`fetchTranscript()`).
-3. **The exact note-posting endpoint/shape** (`postNote()`).
-
-Do a manual dry run against one real resolved conversation before enabling the hourly schedule, and adjust these three spots if the real API disagrees with the docs.
-
 ## 1. Crisp API tokens — one per account, not one total
 
 `user-registration` and `themegrill` are on **separate Crisp accounts** (different logins), not just different inboxes under one account — confirmed directly, not assumed. That means **two independent tokens**, created separately in each account, and credentials cannot be shared between them.
@@ -73,10 +63,20 @@ Phase 1's PAT has **Contents: Read-only**. Stage 1 needs to commit the advanced 
 
 Normally, full investigation only ever runs on a *resolved* conversation — see the reasoning in `prompts/crisp-triage-agent.md`. Two exceptions, both handled in `crisp-classify.mjs`, not the lightweight active-dedupe script:
 
-- **Manual**: a support agent adds a private note containing `@tg-autopilot investigate`. Skips the cheap classifier entirely — a human already made the call — and goes straight to full investigation. Works any number of times; each *new* note re-triggers it (tracked by counting matching notes per conversation, not by trying to identify "which" note, since two notes can have identical text).
-- **Automatic**: a conversation open longer than **6 hours** also gets checked by the same cheap classifier used for resolved conversations. If it agrees this looks like a real bug/feature, it's escalated the same way. This fires **at most once per conversation** automatically — it won't re-check itself every hour after that, since a real investigation costs real money. If something changes later and it genuinely needs another look, that's what the manual note is for.
+- **Manual**: a support agent adds a private note containing `@tg-autopilot investigate`. Skips the cheap classifier entirely — a human already made the call — and goes straight to full investigation. Works any number of times; each *new* note re-triggers it (tracked by counting matching notes per conversation, not by trying to identify "which" note, since two notes can have identical text). The note-detection message fetch is capped to the first ~40 conversations (2 pages) — conversations are sorted most-recently-updated-first and adding a note is itself an update, so a fresh note always lands near the top; this bound exists purely to avoid fetching full messages for every active conversation on every run.
+- **Automatic**: a conversation open longer than **12 hours** (measured from `active.last`, not `created_at` -- a conversation that resolved and later reopened after a long gap shouldn't look artificially old) gets checked by the same cheap classifier used for resolved conversations. If it agrees this looks like a real bug/feature, it's escalated the same way. This fires **at most once per conversation** automatically, and never for a conversation older than **30 days** (`AUTO_ESCALATE_MAX_HOURS` in `crisp-classify.mjs`) -- a backlog that's sat untouched that long is treated as intentionally left open, not a scan miss. If something changes later and it genuinely needs another look, that's what the manual note is for.
 
 Both paths write to `state/escalated.json` (also committed) so neither one repeats itself needlessly.
+
+## 4d. Investigate-job concurrency and OpenAI rate limits
+
+Every "Investigate" job (one per matrix entry) shares one org-wide OpenAI TPM budget. Confirmed for real: a run with ~10 concurrent investigate jobs hit `429 rate_limit_exceeded` on `gpt-5-mini` repeatedly, and several jobs never recovered -- OpenCode's CLI exited `0` anyway, with no issue filed and no note posted, making a silently-dropped conversation look identical to a successful one in the Actions UI.
+
+Two mitigations are in place in `crisp-triage.yml`:
+- `max-parallel: 4` on the investigate matrix -- doesn't eliminate rate limiting, just makes it less likely by not firing every job at once.
+- After `opencode run` finishes, the workflow checks whether the agent actually called `crisp-post-note.mjs` (its mandatory last step per `prompts/crisp-triage-agent.md`, rule 5). If that call never shows up in the output, the step fails explicitly instead of reporting success.
+
+**If an investigate job fails this way**, re-run just that job from the Actions run page (or "Re-run failed jobs" for the whole run) -- it retries the same `session_id`/`repo`/`kind`, no state to reset first. If this becomes frequent, the next lever is raising `INVESTIGATE_MODEL`'s tier (a higher tier typically also carries a higher TPM ceiling) or lowering `max-parallel` further.
 
 ## 5. Sanity-check cost before enabling the schedule
 
