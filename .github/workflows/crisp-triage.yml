@@ -112,6 +112,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Capped, not unlimited: every job shares one org-wide OpenAI TPM budget
+      # (500k/min for gpt-5-mini), so a large matrix firing all at once burns
+      # through it fast. Confirmed for real -- a run with ~10 concurrent jobs
+      # already hit 429s repeatedly, and some jobs never recovered (see the
+      # "Investigate and act" step's own retry-detection below). Capping
+      # concurrency doesn't eliminate rate limiting, just makes it rarer.
+      max-parallel: 4
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     steps:
@@ -196,6 +203,15 @@ jobs:
           }
           JSON
 
+      # opencode's CLI can exit 0 even when it never finished the task -- seen
+      # for real: a mid-investigation OpenAI rate-limit (429) error with no
+      # further retry, no issue filed, no Crisp note posted, yet the step
+      # still reported success. The prompt's own rule 5 ("always leave a note
+      # back... this step runs every time, no exceptions") gives a concrete,
+      # checkable signal: if the transcript of tool calls never actually
+      # invokes crisp-post-note.mjs, the agent didn't complete its mandatory
+      # last step, regardless of what exit code it returned -- fail the step
+      # so this shows up instead of silently vanishing.
       - name: Investigate and act
         working-directory: workspace
         env:
@@ -205,8 +221,13 @@ jobs:
           CRISP_KEY: ${{ secrets[format('CRISP_{0}_KEY', matrix.account)] }}
           CRISP_WEBSITE_ID: ${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}
         run: |
+          set +e
           opencode run "$(cat "${{ steps.prompt.outputs.path }}")" \
             --model "openai/${{ vars.INVESTIGATE_MODEL || 'gpt-5-mini' }}" \
             --auto \
             --format json \
-            | tee "$GITHUB_STEP_SUMMARY"
+            | tee "$GITHUB_STEP_SUMMARY" > /tmp/opencode-output.json
+          if ! grep -q "crisp-post-note.mjs" /tmp/opencode-output.json; then
+            echo "::error::Agent never called crisp-post-note.mjs -- it did not complete its mandatory last step (likely died mid-run, e.g. an unrecovered rate limit). Session ${{ matrix.session_id }} was left with no GitHub-side outcome and no note back to the customer."
+            exit 1
+          fi
