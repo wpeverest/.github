@@ -140,10 +140,16 @@ jobs:
       # $HOME, not /tg-autopilot: the runner user can't write to filesystem
       # root ("mkdir: cannot create directory '/tg-autopilot': Permission
       # denied"). $HOME is always writable and still outside the repo tree.
+      # crisp-post-note.mjs does `import { postNote } from "./crisp-client.mjs"`
+      # -- a relative import that needs crisp-client.mjs sitting right next
+      # to it here too, not just in its original scripts/ folder. Missing
+      # this broke the note-back step for real (ERR_MODULE_NOT_FOUND),
+      # though the agent noticed and reported it rather than failing silently.
       - name: Place Crisp note-posting helper (kept outside the repo tree, no name collision)
         run: |
           mkdir -p "$HOME/tg-autopilot"
           cp .bot-tools/scripts/crisp-post-note.mjs "$HOME/tg-autopilot/crisp-post-note.mjs"
+          cp .bot-tools/scripts/crisp-client.mjs "$HOME/tg-autopilot/crisp-client.mjs"
 
       - name: Re-fetch this conversation's transcript
         id: transcript
