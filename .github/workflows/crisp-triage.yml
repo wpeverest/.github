@@ -14,6 +14,11 @@ on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Investigate ONE specific conversation right now (session_xxxx), skipping the full scan entirely. Leave blank for the normal scan."
+        type: string
+        required: false
 
 concurrency:
   group: crisp-triage
@@ -24,7 +29,9 @@ jobs:
     name: Fetch and classify conversations
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.classify.outputs.matrix }}
+      # Whichever mode actually ran -- an empty string from a skipped step is
+      # falsy, so this picks up whichever one produced a result.
+      matrix: ${{ steps.classify.outputs.matrix || steps.classify-one.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,8 +41,37 @@ jobs:
         with:
           node-version: "20"
 
+      # Only when a specific session_id was given via workflow_dispatch:
+      # investigate that ONE conversation right now, skipping the full scan
+      # entirely -- for "I want to check this specific conversation right
+      # now" rather than waiting for the next hourly pass to reach it.
+      - name: Classify one session (direct lookup)
+        id: classify-one
+        # Explicit event_name check first, not just comparing the input to
+        # '': github.event.inputs doesn't exist at all on a schedule trigger,
+        # so .session_id is null there -- and GitHub Actions coerces a
+        # null-vs-string comparison to numbers, where null == '' is FALSE.
+        # Skipping this check would have silently broken the entire hourly
+        # schedule (wrong branch on every scheduled run), caught before ever
+        # shipping it.
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.session_id != ''
+        env:
+          CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
+          CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
+          CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
+          CRISP_THEMEGRILL_IDENTIFIER: ${{ secrets.CRISP_THEMEGRILL_IDENTIFIER }}
+          CRISP_THEMEGRILL_KEY: ${{ secrets.CRISP_THEMEGRILL_KEY }}
+          CRISP_THEMEGRILL_WEBSITE_ID: ${{ vars.CRISP_THEMEGRILL_WEBSITE_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLASSIFY_MODEL: ${{ vars.CLASSIFY_MODEL || 'gpt-5-mini' }}
+          TARGET_SESSION_ID: ${{ github.event.inputs.session_id }}
+        run: |
+          node scripts/crisp-classify-one.mjs
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
       - name: Classify
         id: classify
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.session_id == ''
         env:
           # Two separate Crisp accounts (different logins), each with its own
           # credential set -- see config/inbox-to-repo.json for how the
@@ -58,6 +94,7 @@ jobs:
       # new issue, only flags a match against an already-open one -- safe to
       # run on a conversation that isn't finished yet, unlike full investigation.
       - name: Check active conversations for duplicates
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.session_id == ''
         env:
           CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
           CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
