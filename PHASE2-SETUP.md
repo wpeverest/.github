@@ -69,6 +69,15 @@ Phase 1's PAT has **Contents: Read-only**. Stage 1 needs to commit the advanced 
 - `themegrill`'s org default repo permission happens to be **write** for all members, so once `tg-autopilot` is a member there, it already has write access to every repo — no per-repo collaborator setup was needed, just the org invite and this token.
 - The workflow picks whichever token matches a conversation's target repo's org: `startsWith(matrix.repo, 'themegrill/') && secrets.BOT_TOKEN_THEMEGRILL || secrets.BOT_TOKEN`. Onboarding a third org later means the same pattern: a new PAT, a new secret, one more branch in that expression (or, once there are more than two, worth switching to a lookup table instead).
 
+## 4c. Escalating a still-open conversation, without waiting for it to resolve
+
+Normally, full investigation only ever runs on a *resolved* conversation — see the reasoning in `prompts/crisp-triage-agent.md`. Two exceptions, both handled in `crisp-classify.mjs`, not the lightweight active-dedupe script:
+
+- **Manual**: a support agent adds a private note containing `@tg-autopilot investigate`. Skips the cheap classifier entirely — a human already made the call — and goes straight to full investigation. Works any number of times; each *new* note re-triggers it (tracked by counting matching notes per conversation, not by trying to identify "which" note, since two notes can have identical text).
+- **Automatic**: a conversation open longer than **6 hours** also gets checked by the same cheap classifier used for resolved conversations. If it agrees this looks like a real bug/feature, it's escalated the same way. This fires **at most once per conversation** automatically — it won't re-check itself every hour after that, since a real investigation costs real money. If something changes later and it genuinely needs another look, that's what the manual note is for.
+
+Both paths write to `state/escalated.json` (also committed) so neither one repeats itself needlessly.
+
 ## 5. Sanity-check cost before enabling the schedule
 
 ThemeIsle's own numbers: $0.0003 per conversation when Stage 1 (or a quick Stage 2 look) concludes "no bug," up to ~$2 for a deep investigation that finds and files a real bug. Before turning on the hourly cron, estimate your actual resolved-conversation volume and multiply by a rough blended cost to sanity-check the monthly bill. Start with `workflow_dispatch` manual runs, not the schedule, until you trust the numbers.

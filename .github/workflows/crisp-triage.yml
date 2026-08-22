@@ -90,7 +90,7 @@ jobs:
           set +e
           git config user.name "tg-autopilot"
           git config user.email "tg-autopilot@users.noreply.github.com"
-          git add state/cursor.json state/active-notified.json
+          git add state/cursor.json state/active-notified.json state/escalated.json
           git diff --cached --quiet || git commit -m "Advance Crisp triage state [skip ci]"
           for attempt in 1 2 3 4 5; do
             git push && exit 0
