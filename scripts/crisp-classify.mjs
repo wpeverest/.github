@@ -273,7 +273,24 @@ async function main() {
     }
   }
 
-  await writeFile("matrix.json", JSON.stringify(matrix));
+  // The resolved-conversations loop and the active-conversation escalation
+  // loop run independently and can both claim the same session_id within one
+  // run -- confirmed for real: a conversation resolved since the cursor gets
+  // picked up by the first loop, then a fresh manual-trigger note reopens it
+  // in Crisp (observed behavior, not documented), so the second loop's
+  // active-conversation fetch finds it too and escalates it again. Neither
+  // loop knows about the other's matrix entries as it runs, so dedupe here,
+  // once, right before writing -- keep the first entry seen per session_id
+  // rather than guessing which path's kind/repo verdict should "win".
+  const seenSessionIds = new Set();
+  const dedupedMatrix = matrix.filter((entry) => {
+    if (seenSessionIds.has(entry.session_id)) return false;
+    seenSessionIds.add(entry.session_id);
+    return true;
+  });
+  const duplicatesRemoved = matrix.length - dedupedMatrix.length;
+
+  await writeFile("matrix.json", JSON.stringify(dedupedMatrix));
   await writeFile("state/cursor.json", JSON.stringify({ last_checked: runStartedAt }, null, 2) + "\n");
   await writeFile("state/escalated.json", JSON.stringify(escalated, null, 2) + "\n");
 
@@ -281,7 +298,7 @@ async function main() {
     const lines = [
       `### Crisp triage — Stage 1`,
       ``,
-      `Fetched: ${totalFetched} · Actionable: ${matrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled}`,
+      `Fetched: ${totalFetched} · Actionable: ${dedupedMatrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled}${duplicatesRemoved ? ` · Duplicate session_id across loops (deduped): ${duplicatesRemoved}` : ""}`,
       `Escalated from active: ${manualEscalations} manual, ${autoEscalations} auto (stale ${AUTO_ESCALATE_HOURS}h–${AUTO_ESCALATE_MAX_HOURS}h)`,
     ];
     if (skippedUnmapped.length) {
