@@ -61,19 +61,27 @@ export async function fetchResolvedConversationsSince(creds, sinceIso) {
 }
 
 // Fetch every currently-active (not yet resolved) conversation, across
-// pages, capped at 5 pages (~100 conversations) -- bounds cost regardless of
-// how many tickets happen to be open at once. Used for the lightweight
-// dedupe-only check on active conversations (never files a new issue, only
-// flags a match against an already-tracked one), unlike the resolved-only
-// full investigate-and-file pipeline.
+// pages, capped at 20 pages (~400 conversations) -- bounds cost regardless
+// of how many tickets happen to be open at once. Used for the lightweight
+// dedupe-only check on active conversations, and for the manual/time-based
+// escalation checks in crisp-classify.mjs.
+//
+// order_date_updated=1 sorts most-recently-updated first. This matters for
+// real correctness, not just tidiness: a support agent adding a manual
+// trigger note UPDATES the conversation, and with 100+ conversations
+// routinely active in this account (confirmed for real -- every run without
+// this hit the old 5-page cap), a freshly-noted conversation could land past
+// page 5 and never get fetched at all if sorted some other way. Confirmed
+// missing exactly this way once already: a manual-trigger note went
+// undetected because its conversation was never in the fetched pages.
 // VERIFY: Crisp's docs describe filter_resolved and filter_not_resolved as
 // two separate params (not one true/false toggle) -- using the latter here.
 // Confirm against a real response before trusting this excludes resolved
 // conversations correctly.
 export async function fetchActiveConversations(creds) {
   const conversations = [];
-  for (let page = 1; page <= 5; page++) {
-    const params = new URLSearchParams({ filter_not_resolved: "true" });
+  for (let page = 1; page <= 20; page++) {
+    const params = new URLSearchParams({ filter_not_resolved: "true", order_date_updated: "1" });
     const { data } = await crispGet(creds, `/website/${creds.websiteId}/conversations/${page}?${params}`);
     if (!data || data.length === 0) break;
     conversations.push(...data);

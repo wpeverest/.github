@@ -42,7 +42,7 @@ import {
 import { chatJSON } from "./openai-client.mjs";
 
 const { GITHUB_STEP_SUMMARY } = process.env;
-const AUTO_ESCALATE_HOURS = 6;
+const AUTO_ESCALATE_HOURS = 12;
 
 // For a single-product (or Crisp-tagged-inbox) account: just actionable/kind.
 async function classify(transcript) {
