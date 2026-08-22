@@ -69,6 +69,14 @@ async function findMatchingIssue(transcript, issues) {
 async function main() {
   const accounts = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).accounts;
   const notified = new Set(JSON.parse(await readFile("state/active-notified.json", "utf8").catch(() => "[]")));
+  // crisp-classify.mjs runs before this step and may have already escalated
+  // some of these same active conversations (manual note, or open 6h+) into
+  // matrix.json for full investigation. Skip those here so a conversation
+  // doesn't get both a full investigation AND this lighter dedupe-only
+  // treatment in the same run.
+  const escalatedThisRun = new Set(
+    JSON.parse(await readFile("matrix.json", "utf8").catch(() => "[]")).map((m) => m.session_id)
+  );
 
   let checked = 0;
   let matched = 0;
@@ -87,6 +95,7 @@ async function main() {
 
     for (const conversation of conversations) {
       if (notified.has(conversation.session_id)) continue;
+      if (escalatedThisRun.has(conversation.session_id)) continue;
       checked++;
 
       const transcript = await fetchTranscript(creds, conversation.session_id);

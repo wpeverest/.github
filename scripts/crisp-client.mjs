@@ -92,12 +92,32 @@ export function getInboxKey(conversation) {
 }
 
 // VERIFY: exact path per Crisp's REST API v1 conversation-messages endpoint.
-export async function fetchTranscript(creds, sessionId) {
+export async function fetchRawMessages(creds, sessionId) {
   const { data } = await crispGet(creds, `/website/${creds.websiteId}/conversation/${sessionId}/messages`);
-  return (data ?? [])
+  return data ?? [];
+}
+
+export async function fetchTranscript(creds, sessionId) {
+  const messages = await fetchRawMessages(creds, sessionId);
+  return messages
     .filter((m) => m.type === "text")
     .map((m) => `${m.from === "user" ? "Customer" : "Agent"}: ${m.content}`)
     .join("\n");
+}
+
+// Counts private notes containing this phrase -- support explicitly asking
+// for a full investigation right now, regardless of resolved status or what
+// a cheap classifier would say. Deliberately a count, not an attempt to
+// identify "which" note: no message field is confirmed to reliably
+// distinguish two notes with identical text (support could plausibly post
+// the exact same trigger phrase twice), so counting sidesteps needing one.
+// Callers store the count they last actioned per session; a HIGHER count on
+// a later check means a genuinely new note was added since, even if its
+// text is identical to one already actioned.
+export function countManualTriggerNotes(messages, phrase = "@tg-autopilot investigate") {
+  return messages.filter(
+    (m) => m.type === "note" && (m.content ?? "").toLowerCase().includes(phrase.toLowerCase())
+  ).length;
 }
 
 // VERIFY: exact path/shape for adding a private note to a conversation.
