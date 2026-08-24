@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// Substitutes {{REPO}}, {{KIND}}, {{SESSION_ID}}, {{CONVERSATION_URL}},
-// {{TRANSCRIPT}} into the Stage 2 prompt template and prints the result to
-// stdout.
+// Fills the Stage 2 prompt template's placeholders and prints the result.
 import { readFile } from "node:fs/promises";
 
 const [templatePath, repo, kind, sessionId, conversationUrl, transcriptPath] = process.argv.slice(2);
@@ -17,8 +15,7 @@ const [rawTemplate, transcript] = await Promise.all([
   readFile(transcriptPath, "utf8"),
 ]);
 
-// The leading HTML comment is documentation for humans editing the template;
-// strip it so it isn't sent to the model as part of its instructions.
+// Strip the leading HTML doc-comment -- it's for humans, not the model.
 const template = rawTemplate.replace(/^<!--[\s\S]*?-->\n*/, "");
 
 const filled = template

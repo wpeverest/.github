@@ -1,15 +1,9 @@
 #!/usr/bin/env node
 // Lightweight dedupe check for currently-ACTIVE (not yet resolved) Crisp
-// conversations. Deliberately narrow: never files a new issue and never
-// investigates code -- only checks whether a conversation matches an
-// already-open GitHub issue, and if so notifies both sides. This is safe to
-// run on an incomplete/still-open conversation in a way that full
-// investigation is not (see prompts/crisp-triage-agent.md's reasoning for
-// why new-issue filing waits for a conversation to resolve).
-//
-// No OpenCode, no repo checkout: matching against already-open issue titles
-// is a plain cheap classification call, and posting a comment/note is a
-// plain API call -- none of that needs an agent or a cloned repo.
+// conversations. Deliberately narrow: never files a new issue, only checks
+// for a match against an already-open one and notifies both sides -- safe
+// to run on an incomplete conversation, unlike full investigation (see
+// prompts/crisp-triage-agent.md for why new-issue filing waits for resolve).
 import { readFile, writeFile } from "node:fs/promises";
 import {
   fetchActiveConversations,
@@ -69,11 +63,8 @@ async function findMatchingIssue(transcript, issues) {
 async function main() {
   const accounts = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).accounts;
   const notified = new Set(JSON.parse(await readFile("state/active-notified.json", "utf8").catch(() => "[]")));
-  // crisp-classify.mjs runs before this step and may have already escalated
-  // some of these same active conversations (manual note, or open 6h+) into
-  // matrix.json for full investigation. Skip those here so a conversation
-  // doesn't get both a full investigation AND this lighter dedupe-only
-  // treatment in the same run.
+  // Skip anything crisp-classify.mjs already escalated into matrix.json this
+  // run, so it doesn't also get this lighter dedupe-only treatment.
   const escalatedThisRun = new Set(
     JSON.parse(await readFile("matrix.json", "utf8").catch(() => "[]")).map((m) => m.session_id)
   );
@@ -108,29 +99,19 @@ async function main() {
       const match = await findMatchingIssue(transcript, issues);
       if (!match) continue;
 
-      // The matched issue can be the one THIS same conversation originally
-      // caused -- a still-open conversation gets re-scanned every hour and
-      // will otherwise match back to its own issue, producing a false
-      // "another user is hitting this" comment on a conversation that IS
-      // the source. Confirmed for real: session_f118221b matched back to
-      // colormag#293, which its own Source: line said it had filed.
+      // Skip if the matched issue is the one THIS conversation itself
+      // caused -- otherwise a still-open conversation matches back to its
+      // own issue every rescan (confirmed for real once).
       if ((match.body ?? "").includes(conversation.session_id)) {
         notified.add(conversation.session_id);
         console.log(`[${accountKey}] ${conversation.session_id}: matched ${repo}#${match.number} but it's the issue's own source -- skipping`);
         continue;
       }
 
-      // state/active-notified.json is meant to stop this exact repeat, but
-      // it's committed via a racy git rebase (crisp-triage.yml's "Commit
-      // advanced state" step uses `-X ours`, which can silently drop an
-      // earlier run's addition on conflict -- an accepted risk there,
-      // documented as "rare"). Confirmed for real: three back-to-back runs
-      // today all lost the race and each posted its own recurrence comment
-      // on themegrill/colormag-pro#296 for the same still-open conversation.
-      // A note repeating in Crisp is low-cost noise; three duplicate
-      // "another user hit this" comments on a real issue is not -- so guard
-      // the comment specifically against GitHub's own state, which has no
-      // such race, rather than trusting the git-committed file alone.
+      // state/active-notified.json can lose a recent addition to a racy git
+      // rebase (crisp-triage.yml's state commit uses `-X ours`), causing
+      // duplicate comments on a real issue -- confirmed for real. Guard
+      // against GitHub's own comment history instead, which has no such race.
       const existingComments = await listIssueComments(repo, match.number);
       const alreadyCommented = existingComments.some((c) =>
         (c.body ?? "").includes(conversation.session_id)

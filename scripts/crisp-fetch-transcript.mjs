@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-// Re-fetches one conversation's transcript for Stage 2. Stage 1 already
-// fetched it once during classification, but that result isn't passed
-// through the job matrix (keeps matrix.json small) -- re-fetching is one
-// cheap Crisp call, not worth plumbing through job outputs to avoid.
+// Re-fetches the transcript for Stage 2 rather than passing Stage 1's copy
+// through the job matrix, keeping matrix.json small.
 import { fetchTranscript } from "./crisp-client.mjs";
 
 const [sessionId] = process.argv.slice(2);
