@@ -1,6 +1,4 @@
-// Shared cheap-classification call, used by both the resolved-conversation
-// classifier and the active-conversation dedupe check -- factored out so the
-// fetch/parse boilerplate exists in exactly one place.
+// Shared cheap-classification call used by both classifiers.
 const { OPENAI_API_KEY, CLASSIFY_MODEL } = process.env;
 
 export async function chatJSON(systemPrompt, userContent, fallback) {

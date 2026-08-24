@@ -1,43 +1,27 @@
 #!/usr/bin/env node
 // Stage 1 of the Crisp -> AI -> GitHub issue pipeline.
 //
-// Fetches conversations resolved since the last run, maps each to a repo via
-// config/inbox-to-repo.json, and classifies each with a single cheap,
-// tool-less model call -- this is the step that keeps cost down, since most
-// support conversations are not actionable at all and stop here.
+// Fetches conversations resolved since the last run, maps each to a repo,
+// and classifies each with one cheap, tool-less model call -- most support
+// conversations aren't actionable and stop here.
 //
-// Also escalates a still-open (active) conversation straight to full
-// investigation in two cases, without waiting for it to resolve:
+// Also escalates a still-open conversation straight to full investigation,
+// without waiting for it to resolve, in two cases:
 //   - a private note asks for it explicitly: "@tg-autopilot investigate"
-//   - it's been open between AUTO_ESCALATE_HOURS and AUTO_ESCALATE_MAX_HOURS,
-//     and the cheap classifier agrees it looks like a real bug/feature --
-//     fires at most ONCE per conversation automatically; a fresh manual note
-//     can always re-trigger, but the time-based rule never repeats on its
-//     own (real investigation cost, not worth re-spending hourly on the same
-//     still-open ticket).
+//   - it's been open AUTO_ESCALATE_HOURS-AUTO_ESCALATE_MAX_HOURS and the
+//     classifier agrees it looks real -- fires at most once automatically;
+//     a fresh manual note can always re-trigger, the time-based rule can't.
+//     The upper bound exists because this account has a genuine backlog of
+//     conversations abandoned for 100+ days -- auto-escalating something
+//     that stale blind is a bad default (confirmed for real once). Past the
+//     ceiling, only a manual note escalates it.
 //
-//     The upper bound matters for real reasons, not just symmetry: this
-//     account has a genuine backlog of conversations abandoned/never closed
-//     for 100+ days. Auto-escalating something that stale blind is a bad
-//     default -- confirmed for real, a widened fetch page cap surfaced a
-//     conversation open 2548h (~106 days) that auto-escalated on the spot.
-//     Past the ceiling, only a human's manual "@tg-autopilot investigate"
-//     note escalates it -- a deliberate decision, not a blind timer.
+// Writes matrix.json (actionable conversations for Stage 2), state/cursor
+// .json (advanced to this run's start time), and state/escalated.json
+// (per-session auto-escalation/manual-note bookkeeping so neither repeats).
 //
-// Writes:
-//   - matrix.json: actionable conversations for Stage 2 to investigate
-//   - state/cursor.json: advanced to this run's start time
-//   - state/escalated.json: which active conversations were already
-//     auto-escalated (time-based) or which manual-note count was last
-//     actioned per session, so neither path repeats itself needlessly
-//
-// Provider: OpenAI (swap freely -- Robert's team at ThemeIsle runs a mix and
-// switches per cost/quality, we started here only because an OpenAI key
-// existed before an Anthropic one did). CLASSIFY_MODEL is intentionally
-// required, not defaulted silently: verify the exact model id against your
-// OpenAI account (platform.openai.com/docs/models) before relying on it --
-// some names floating around as of writing (e.g. "GPT-5.6 Terra/Luna") come
-// from low-quality pricing-aggregator sites, not confirmed OpenAI docs.
+// Provider: OpenAI, swappable freely. CLASSIFY_MODEL is required, not
+// defaulted -- verify the model id against your account before relying on it.
 import { readFile, writeFile } from "node:fs/promises";
 import {
   fetchResolvedConversationsSince,
@@ -54,7 +38,7 @@ const { GITHUB_STEP_SUMMARY } = process.env;
 const AUTO_ESCALATE_HOURS = 12;
 const AUTO_ESCALATE_MAX_HOURS = 24 * 30; // 30 days -- past this, only a manual note escalates it
 
-// For a single-product (or Crisp-tagged-inbox) account: just actionable/kind.
+// Single-product (or Crisp-tagged-inbox) account: just actionable/kind.
 async function classify(transcript) {
   return chatJSON(
     "You triage customer support transcripts for a WordPress plugin company. " +
@@ -72,10 +56,9 @@ async function classify(transcript) {
   );
 }
 
-// For an account with many products and no structured Crisp signal for which
-// one: same actionable/kind decision, plus which product (from the known
-// list only -- never invent a name) and free/pro edition. Unknown product is
-// the safe default: skipped and logged for a human to add, not guessed at.
+// Multi-product account with no structured signal for which one: same
+// actionable/kind decision plus product name (from the known list only) and
+// free/pro edition. Unknown product is skipped and logged, not guessed at.
 async function classifyWithProduct(transcript, productNames) {
   return chatJSON(
     "You triage customer support transcripts for a WordPress theme/plugin company " +
@@ -99,18 +82,15 @@ async function classifyWithProduct(transcript, productNames) {
   );
 }
 
-// Shared by the resolved-conversation loop and the manual/time escalation
-// checks: three routing modes, checked in order. A single-product account
-// maps everything to one repo directly (no lookup at all); an `inboxes` map
-// is for when Crisp itself structurally tags which product an inbox serves;
-// `products` is for an account with many products and no such signal, where
-// the classifier itself has to name which one.
+// Three routing modes: a single-product account maps to one repo directly;
+// `inboxes` is for when Crisp structurally tags which product an inbox
+// serves; `products` is for many products with no such signal, so the
+// classifier names one itself.
 //
-// `skipClassifier: true` (used for a manual-trigger note) always returns
-// actionable=true -- the whole point of a human tagging it is that they've
-// already made the call, so a cheap classifier shouldn't get to override
-// that judgment. It still runs classifyWithProduct for a `products` account
-// purely to resolve which repo, ignoring that call's own actionable verdict.
+// `skipClassifier: true` (manual-trigger note) always returns
+// actionable=true -- a human already made the call. Still runs
+// classifyWithProduct for a `products` account to resolve the repo, ignoring
+// that call's own actionable verdict.
 async function classifyAndRoute(accountConfig, conversation, transcript, { skipClassifier = false } = {}) {
   if (accountConfig.repo) {
     const { actionable, kind } = skipClassifier
@@ -143,15 +123,12 @@ async function main() {
   const runStartedAt = new Date().toISOString();
   const cursor = JSON.parse(await readFile("state/cursor.json", "utf8"));
   const accounts = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).accounts;
-  // If the active-conversation dedupe check already matched this session to
-  // a tracked issue while it was still open, running it through the full
-  // pipeline again just produces a second, redundant "recurrence" comment on
-  // the same issue -- observed for real on themegrill/colormag#291.
+  // Skip anything the active-conversation dedupe check already matched to a
+  // tracked issue -- otherwise this produces a second, redundant comment.
   const activeNotified = new Set(
     JSON.parse(await readFile("state/active-notified.json", "utf8").catch(() => "[]"))
   );
-  // Per-session bookkeeping for the two active-conversation escalation
-  // paths: { [session_id]: { autoEscalated: bool, manualNoteCount: number } }
+  // { [session_id]: { autoEscalated: bool, manualNoteCount: number } }
   const escalated = JSON.parse(await readFile("state/escalated.json", "utf8").catch(() => "{}"));
 
   const matrix = [];
@@ -161,10 +138,9 @@ async function main() {
   let manualEscalations = 0;
   let autoEscalations = 0;
 
-  // Two separate Crisp ACCOUNTS (different logins), not just different
-  // inboxes under one account -- each is fetched and classified independently.
-  // An account not yet credentialed (e.g. still awaiting access) is skipped
-  // with a warning rather than crashing the whole run.
+  // Each Crisp account (different logins) is fetched and classified
+  // independently; one not yet credentialed is skipped with a warning
+  // rather than crashing the whole run.
   for (const [accountKey, accountConfig] of Object.entries(accounts)) {
     let creds;
     try {
@@ -202,22 +178,13 @@ async function main() {
     }
 
     // ---- Active conversations: manual-note and time-based escalation ----
-    // Deliberately independent of the lightweight dedupe-only check in
-    // crisp-dedupe-active.mjs, which skips anything that ends up in
-    // matrix.json this run (see its own skip logic).
+    // Independent of crisp-dedupe-active.mjs, which skips anything that
+    // ends up in matrix.json this run.
     //
-    // Real cost/perf fix: don't fetch every conversation's full message
-    // history just to check for a manual note -- only conversations actually
-    // touched since the last run could possibly have a new one. cursor.last_
-    // checked already marks exactly that boundary (it's this same script's
-    // own "last time I ran" timestamp, read at the top of main() before this
-    // run advances it), and adding a note IS an update, so comparing each
-    // conversation's own active.last against it is an exact test, not a
-    // guess -- replaces the previous fixed "check the top 40" heuristic,
-    // which paid a flat cost every run regardless of how little had actually
-    // changed. The staleness check below needs no message fetch at all (the
-    // conversation list already carries active.last/created_at); a full
-    // fetch only happens for whichever check actually looks worth pursuing.
+    // Only fetch messages for a manual-note check on conversations touched
+    // since cursor.last_checked (adding a note is itself an update) -- an
+    // exact test, cheaper than fetching every active conversation's history.
+    // The staleness check needs no message fetch at all.
     const lastCheckedMs = new Date(cursor.last_checked).getTime();
     const activeConversations = await fetchActiveConversations(creds);
     activeConversations.forEach((conversation) => {
@@ -228,13 +195,9 @@ async function main() {
     for (const conversation of activeConversations) {
       const record = escalated[conversation.session_id] ?? { autoEscalated: false, manualNoteCount: 0 };
 
-      // active.last, not created_at: a thread resolved once and reopened
-      // weeks later by a returning customer would otherwise read as "50
-      // days old" by creation time, when the current unresolved period only
-      // just started. active.last reflects the latter, and correctly gives
-      // a reactivated thread a fresh AUTO_ESCALATE_HOURS grace period too --
-      // the same restraint we want for a genuinely brand-new conversation.
-      // No message fetch needed for this check -- pure conversation metadata.
+      // active.last, not created_at: a thread reopened weeks later by a
+      // returning customer should get a fresh grace period, not read as
+      // "50 days old." Pure conversation metadata -- no message fetch.
       const lastActiveAt = conversation.active?.last ?? conversation.created_at;
       const staleHours = (Date.now() - lastActiveAt) / (1000 * 60 * 60);
       const eligibleForAutoEscalate =
@@ -278,15 +241,10 @@ async function main() {
     }
   }
 
-  // The resolved-conversations loop and the active-conversation escalation
-  // loop run independently and can both claim the same session_id within one
-  // run -- confirmed for real: a conversation resolved since the cursor gets
-  // picked up by the first loop, then a fresh manual-trigger note reopens it
-  // in Crisp (observed behavior, not documented), so the second loop's
-  // active-conversation fetch finds it too and escalates it again. Neither
-  // loop knows about the other's matrix entries as it runs, so dedupe here,
-  // once, right before writing -- keep the first entry seen per session_id
-  // rather than guessing which path's kind/repo verdict should "win".
+  // The resolved-conversations loop and the active-escalation loop can both
+  // claim the same session_id in one run (confirmed for real: a manual note
+  // reopens a just-resolved conversation, so both loops pick it up). Dedupe
+  // once here, keeping the first entry seen per session_id.
   const seenSessionIds = new Set();
   const dedupedMatrix = matrix.filter((entry) => {
     if (seenSessionIds.has(entry.session_id)) return false;
