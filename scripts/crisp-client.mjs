@@ -80,16 +80,42 @@ export async function fetchResolvedConversationsSince(creds, sinceIso) {
 // combined per-run volume in crisp-dedupe-active.mjs to ~800 requests and hit
 // Crisp's per-route rate limit for real.
 //
-// order_date_updated=1 sorts most-recently-updated first -- a manual
-// trigger note updates the conversation, so this guarantees a fresh note
-// surfaces near the top instead of getting buried past the page cap
-// (confirmed missing once already, before this sort was added). It also
-// means the cap only drops the least-recently-touched conversations, not
-// arbitrary ones.
+// order_date_updated=1 sorts most-recently-updated first, so the cap only
+// drops the least-recently-touched conversations rather than arbitrary ones.
+// This is NOT enough on its own to guarantee a manual trigger note survives
+// the cap, though -- confirmed for real on a high-volume account (THEMEGRILL,
+// which itself exceeds the cap): if 200+ *other* conversations get touched
+// between runs, a manually-noted conversation can still fall outside the
+// window despite being freshly updated. See searchConversationsForManualTrigger
+// below for how manual triggers avoid depending on this cap at all.
 export async function fetchActiveConversations(creds) {
   const conversations = [];
   for (let page = 1; page <= 10; page++) {
     const params = new URLSearchParams({ filter_not_resolved: "true", order_date_updated: "1" });
+    const { data } = await crispGet(creds, `/website/${creds.websiteId}/conversations/${page}?${params}`);
+    if (!data || data.length === 0) break;
+    conversations.push(...data);
+    if (data.length < 20) break;
+  }
+  return conversations;
+}
+
+// Finds active conversations containing `phrase` anywhere in their content
+// (including private notes -- Crisp's search doesn't distinguish note text
+// from regular messages), via Crisp's own search rather than paginating the
+// full active list. A manual trigger note should never depend on
+// fetchActiveConversations' page cap or its most-recently-updated ordering --
+// the phrase match here is authoritative regardless of how many other
+// conversations were touched more recently. Small page cap is enough since
+// genuine matches for a specific trigger phrase should be rare.
+export async function searchConversationsForManualTrigger(creds, phrase) {
+  const conversations = [];
+  for (let page = 1; page <= 5; page++) {
+    const params = new URLSearchParams({
+      filter_not_resolved: "true",
+      search_type: "text",
+      search_query: phrase,
+    });
     const { data } = await crispGet(creds, `/website/${creds.websiteId}/conversations/${page}?${params}`);
     if (!data || data.length === 0) break;
     conversations.push(...data);
