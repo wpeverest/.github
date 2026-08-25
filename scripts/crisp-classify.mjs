@@ -130,19 +130,10 @@ async function main() {
   );
   // { [session_id]: { autoEscalated: bool, manualNoteCount: number } }
   const escalated = JSON.parse(await readFile("state/escalated.json", "utf8").catch(() => "{}"));
-  // Sessions that have already gone through a full Stage 2 investigation at
-  // least once, from ANY path (resolved, auto-escalation, manual note).
-  // Without this, a conversation that gets resolved, reopened by the
-  // customer, and resolved again shows up as "newly resolved" every cycle --
-  // fetchResolvedConversationsSince() has no memory of it, so it gets
-  // reinvestigated in full each time. Since crisp-post-note.mjs only dedupes
-  // a note against an existing one with the SAME issue URL, a repeated "not
-  // a real defect" conclusion (no issue URL) isn't deduped at all -- the
-  // customer accumulates one fresh note per resolve/reopen cycle, unbounded
-  // (confirmed for real: one conversation got investigated 6 times over 3
-  // days). Deliberately NOT checked on the manual-note path -- a human
-  // asking "@tg-autopilot investigate" again is an intentional re-trigger,
-  // same as the escalation prompt's own re-trigger rule.
+  // session_ids already fully investigated once (any path). Prevents a
+  // resolve -> reopen -> resolve cycle from reinvestigating (and re-noting)
+  // the same conversation every time -- confirmed for real, 6x in 3 days.
+  // Not checked on the manual-note path; that's an intentional re-trigger.
   const investigated = new Set(
     JSON.parse(await readFile("state/investigated.json", "utf8").catch(() => "[]"))
   );
@@ -243,9 +234,7 @@ async function main() {
       if (!transcript.trim()) continue;
 
       if (hasNewManualNote) {
-        // No investigated.has() guard here on purpose -- a human explicitly
-        // asking to (re-)investigate should always go through, same as the
-        // agent prompt's own "a fresh manual note can always re-trigger" rule.
+        // No investigated guard -- a manual re-trigger should always go through.
         const result = await classifyAndRoute(accountConfig, conversation, transcript, { skipClassifier: true });
         record.manualNoteCount = manualNoteCount;
         if (result.repo) {
@@ -286,9 +275,7 @@ async function main() {
   await writeFile("matrix.json", JSON.stringify(dedupedMatrix));
   await writeFile("state/cursor.json", JSON.stringify({ last_checked: runStartedAt }, null, 2) + "\n");
   await writeFile("state/escalated.json", JSON.stringify(escalated, null, 2) + "\n");
-  // Bound growth the same way as active-notified.json -- a session doesn't
-  // need to stay in here forever, just long enough to survive its own
-  // resolve/reopen cycles.
+  // Bound growth, same as active-notified.json.
   await writeFile("state/investigated.json", JSON.stringify([...investigated].slice(-2000)));
 
   if (GITHUB_STEP_SUMMARY) {
