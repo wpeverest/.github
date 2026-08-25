@@ -3,7 +3,7 @@
   "_format": "accounts.<ACCOUNT_KEY> = one of: { \"repo\": \"org/repo\" } for a single-product account (everything goes to one repo, no product/inbox lookup); { \"inboxes\": { \"<inbox_id>\": { \"repo\": \"org/repo\" } } } when Crisp itself structurally tags which product an inbox serves; or { \"products\": { \"<name>\": { \"free\": \"org/repo\", \"pro\": \"org/repo\" } } } when one account covers many products with no structured Crisp signal for which one -- the classifier reads the transcript itself to pick a product name from this list (or 'unknown', which is skipped and logged, not guessed at) plus free/pro edition.",
   "accounts": {
     "USER_REGISTRATION": {
-      "repo": "wpeverest/user-registration"
+      "repo": "wpeverest/user-registration-pro"
     },
     "THEMEGRILL": {
       "products": {
