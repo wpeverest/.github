@@ -15,27 +15,50 @@ function authHeader(creds) {
   return "Basic " + Buffer.from(`${creds.identifier}:${creds.key}`).toString("base64");
 }
 
+const MAX_RETRIES = 5;
+const BASE_RETRY_DELAY_MS = 1000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Retries on 429 with exponential backoff (honoring Retry-After if Crisp
+// sends one). Confirmed for real: crisp-dedupe-active.mjs's per-conversation
+// loop has no throttling and hit Crisp's per-route rate limit once active
+// conversation volume across both accounts reached ~800 -- a fixed,
+// deterministic failure every run until the burst above the limit is worn
+// down by backoff, not just a one-off flake.
+async function crispFetch(path, options, method) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${CRISP_BASE}${path}`, options);
+    if (res.status !== 429) {
+      if (!res.ok) throw new Error(`Crisp ${method} ${path} failed: ${res.status} ${await res.text()}`);
+      return res.json();
+    }
+    if (attempt >= MAX_RETRIES) {
+      throw new Error(`Crisp ${method} ${path} failed: 429 ${await res.text()} (gave up after ${MAX_RETRIES} retries)`);
+    }
+    const retryAfter = Number(res.headers.get("retry-after"));
+    await sleep(retryAfter > 0 ? retryAfter * 1000 : BASE_RETRY_DELAY_MS * 2 ** attempt);
+  }
+}
+
 // Website Tokens (what we use) require X-Crisp-Tier: website, not "plugin".
 export async function crispGet(creds, path) {
-  const res = await fetch(`${CRISP_BASE}${path}`, {
-    headers: { Authorization: authHeader(creds), "X-Crisp-Tier": "website" },
-  });
-  if (!res.ok) throw new Error(`Crisp GET ${path} failed: ${res.status} ${await res.text()}`);
-  return res.json();
+  return crispFetch(path, { headers: { Authorization: authHeader(creds), "X-Crisp-Tier": "website" } }, "GET");
 }
 
 export async function crispPost(creds, path, body) {
-  const res = await fetch(`${CRISP_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: authHeader(creds),
-      "X-Crisp-Tier": "website",
-      "Content-Type": "application/json",
+  return crispFetch(
+    path,
+    {
+      method: "POST",
+      headers: {
+        Authorization: authHeader(creds),
+        "X-Crisp-Tier": "website",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`Crisp POST ${path} failed: ${res.status} ${await res.text()}`);
-  return res.json();
+    "POST"
+  );
 }
 
 // Fetch every resolved conversation updated since `sinceIso`, across pages.
@@ -51,16 +74,21 @@ export async function fetchResolvedConversationsSince(creds, sinceIso) {
   return conversations;
 }
 
-// Fetch every currently-active (not-yet-resolved) conversation, capped at 20
-// pages (~400) so cost stays bounded regardless of open-ticket volume.
+// Fetch every currently-active (not-yet-resolved) conversation, capped at 10
+// pages (~200) so cost stays bounded regardless of open-ticket volume.
+// Halved from 20 pages (~400) after onboarding a second Crisp account pushed
+// combined per-run volume in crisp-dedupe-active.mjs to ~800 requests and hit
+// Crisp's per-route rate limit for real.
 //
 // order_date_updated=1 sorts most-recently-updated first -- a manual
 // trigger note updates the conversation, so this guarantees a fresh note
 // surfaces near the top instead of getting buried past the page cap
-// (confirmed missing once already, before this sort was added).
+// (confirmed missing once already, before this sort was added). It also
+// means the cap only drops the least-recently-touched conversations, not
+// arbitrary ones.
 export async function fetchActiveConversations(creds) {
   const conversations = [];
-  for (let page = 1; page <= 20; page++) {
+  for (let page = 1; page <= 10; page++) {
     const params = new URLSearchParams({ filter_not_resolved: "true", order_date_updated: "1" });
     const { data } = await crispGet(creds, `/website/${creds.websiteId}/conversations/${page}?${params}`);
     if (!data || data.length === 0) break;
