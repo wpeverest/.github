@@ -1,0 +1,64 @@
+# Manual, one-time-per-account maintenance workflow: marks a newly onboarded
+# Crisp account's entire current active-conversation backlog as already
+# auto-escalated, so crisp-triage.yml's first real scheduled run doesn't fire
+# a burst of investigations against tickets that predate integration (a
+# backlog of ~300 conversations was confirmed for real when onboarding the
+# User Registration account -- ~83% of its active backlog auto-escalated in
+# the first few minutes of a single run). Run this once, right after wiring
+# up a new account's Crisp secrets, before its first scheduled crisp-triage
+# run.
+name: Seed escalated state for a new Crisp account
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: "Account key from config/inbox-to-repo.json (e.g. USER_REGISTRATION)"
+        required: true
+        type: string
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BOT_TOKEN }} # needs contents:write to commit the seeded state back
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Seed
+        env:
+          # Same account roster as crisp-triage.yml's classify job -- add a
+          # new account's triple here whenever crisp-triage.yml gets one.
+          CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
+          CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
+          CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
+          CRISP_THEMEGRILL_IDENTIFIER: ${{ secrets.CRISP_THEMEGRILL_IDENTIFIER }}
+          CRISP_THEMEGRILL_KEY: ${{ secrets.CRISP_THEMEGRILL_KEY }}
+          CRISP_THEMEGRILL_WEBSITE_ID: ${{ vars.CRISP_THEMEGRILL_WEBSITE_ID }}
+        run: node scripts/seed-escalated.mjs "${{ inputs.account }}"
+
+      # Same retry pattern as crisp-triage.yml's "Commit advanced state" --
+      # see that step's comments for why the loop and -X ours are needed.
+      - name: Commit seeded state
+        run: |
+          set +e
+          git config user.name "tg-autopilot"
+          git config user.email "tg-autopilot@users.noreply.github.com"
+          git add state/escalated.json
+          git diff --cached --quiet || git commit -m "Seed escalated state for ${{ inputs.account }} [skip ci]"
+          for attempt in 1 2 3 4 5; do
+            git push && exit 0
+            echo "Push rejected (attempt $attempt/5), rebasing onto origin/master (preferring our state on conflict) and retrying..."
+            git fetch origin master
+            if ! git rebase -X ours origin/master; then
+              echo "::error::Rebase failed outright (not just a content conflict) -- aborting"
+              git rebase --abort
+              exit 1
+            fi
+          done
+          echo "::error::Failed to push seeded state after 5 attempts"
+          exit 1
