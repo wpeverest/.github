@@ -130,10 +130,18 @@ async function main() {
   );
   // { [session_id]: { autoEscalated: bool, manualNoteCount: number } }
   const escalated = JSON.parse(await readFile("state/escalated.json", "utf8").catch(() => "{}"));
+  // session_ids already fully investigated once (any path). Prevents a
+  // resolve -> reopen -> resolve cycle from reinvestigating (and re-noting)
+  // the same conversation every time -- confirmed for real, 6x in 3 days.
+  // Not checked on the manual-note path; that's an intentional re-trigger.
+  const investigated = new Set(
+    JSON.parse(await readFile("state/investigated.json", "utf8").catch(() => "[]"))
+  );
 
   const matrix = [];
   const skippedUnmapped = [];
   let alreadyHandled = 0;
+  let alreadyInvestigated = 0;
   let totalFetched = 0;
   let manualEscalations = 0;
   let autoEscalations = 0;
@@ -160,6 +168,10 @@ async function main() {
         alreadyHandled++;
         continue;
       }
+      if (investigated.has(conversation.session_id)) {
+        alreadyInvestigated++;
+        continue;
+      }
 
       const transcript = await fetchTranscript(creds, conversation.session_id);
       if (!transcript.trim()) continue;
@@ -174,6 +186,7 @@ async function main() {
 
       if (result.actionable && result.kind !== "none") {
         matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+        investigated.add(conversation.session_id);
       }
     }
 
@@ -201,7 +214,10 @@ async function main() {
       const lastActiveAt = conversation.active?.last ?? conversation.created_at;
       const staleHours = (Date.now() - lastActiveAt) / (1000 * 60 * 60);
       const eligibleForAutoEscalate =
-        !record.autoEscalated && staleHours >= AUTO_ESCALATE_HOURS && staleHours <= AUTO_ESCALATE_MAX_HOURS;
+        !record.autoEscalated &&
+        !investigated.has(conversation.session_id) &&
+        staleHours >= AUTO_ESCALATE_HOURS &&
+        staleHours <= AUTO_ESCALATE_MAX_HOURS;
 
       if (!conversation._checkManualNote && !eligibleForAutoEscalate) continue;
 
@@ -218,10 +234,12 @@ async function main() {
       if (!transcript.trim()) continue;
 
       if (hasNewManualNote) {
+        // No investigated guard -- a manual re-trigger should always go through.
         const result = await classifyAndRoute(accountConfig, conversation, transcript, { skipClassifier: true });
         record.manualNoteCount = manualNoteCount;
         if (result.repo) {
           matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+          investigated.add(conversation.session_id);
           manualEscalations++;
           console.log(`[${accountKey}] ${conversation.session_id}: manual "@tg-autopilot investigate" note -> escalated to ${result.repo}`);
         } else {
@@ -232,6 +250,7 @@ async function main() {
         record.autoEscalated = true; // fires at most once, whether actionable or not
         if (result.repo && result.actionable && result.kind !== "none") {
           matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+          investigated.add(conversation.session_id);
           autoEscalations++;
           console.log(`[${accountKey}] ${conversation.session_id}: stale ${staleHours.toFixed(1)}h, classifier agrees -> escalated to ${result.repo}`);
         }
@@ -256,12 +275,14 @@ async function main() {
   await writeFile("matrix.json", JSON.stringify(dedupedMatrix));
   await writeFile("state/cursor.json", JSON.stringify({ last_checked: runStartedAt }, null, 2) + "\n");
   await writeFile("state/escalated.json", JSON.stringify(escalated, null, 2) + "\n");
+  // Bound growth, same as active-notified.json.
+  await writeFile("state/investigated.json", JSON.stringify([...investigated].slice(-2000)));
 
   if (GITHUB_STEP_SUMMARY) {
     const lines = [
       `### Crisp triage — Stage 1`,
       ``,
-      `Fetched: ${totalFetched} · Actionable: ${dedupedMatrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled}${duplicatesRemoved ? ` · Duplicate session_id across loops (deduped): ${duplicatesRemoved}` : ""}`,
+      `Fetched: ${totalFetched} · Actionable: ${dedupedMatrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled} · Already fully investigated before (skipped): ${alreadyInvestigated}${duplicatesRemoved ? ` · Duplicate session_id across loops (deduped): ${duplicatesRemoved}` : ""}`,
       `Escalated from active: ${manualEscalations} manual, ${autoEscalations} auto (stale ${AUTO_ESCALATE_HOURS}h–${AUTO_ESCALATE_MAX_HOURS}h)`,
     ];
     if (skippedUnmapped.length) {
