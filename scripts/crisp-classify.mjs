@@ -130,10 +130,27 @@ async function main() {
   );
   // { [session_id]: { autoEscalated: bool, manualNoteCount: number } }
   const escalated = JSON.parse(await readFile("state/escalated.json", "utf8").catch(() => "{}"));
+  // Sessions that have already gone through a full Stage 2 investigation at
+  // least once, from ANY path (resolved, auto-escalation, manual note).
+  // Without this, a conversation that gets resolved, reopened by the
+  // customer, and resolved again shows up as "newly resolved" every cycle --
+  // fetchResolvedConversationsSince() has no memory of it, so it gets
+  // reinvestigated in full each time. Since crisp-post-note.mjs only dedupes
+  // a note against an existing one with the SAME issue URL, a repeated "not
+  // a real defect" conclusion (no issue URL) isn't deduped at all -- the
+  // customer accumulates one fresh note per resolve/reopen cycle, unbounded
+  // (confirmed for real: one conversation got investigated 6 times over 3
+  // days). Deliberately NOT checked on the manual-note path -- a human
+  // asking "@tg-autopilot investigate" again is an intentional re-trigger,
+  // same as the escalation prompt's own re-trigger rule.
+  const investigated = new Set(
+    JSON.parse(await readFile("state/investigated.json", "utf8").catch(() => "[]"))
+  );
 
   const matrix = [];
   const skippedUnmapped = [];
   let alreadyHandled = 0;
+  let alreadyInvestigated = 0;
   let totalFetched = 0;
   let manualEscalations = 0;
   let autoEscalations = 0;
@@ -160,6 +177,10 @@ async function main() {
         alreadyHandled++;
         continue;
       }
+      if (investigated.has(conversation.session_id)) {
+        alreadyInvestigated++;
+        continue;
+      }
 
       const transcript = await fetchTranscript(creds, conversation.session_id);
       if (!transcript.trim()) continue;
@@ -174,6 +195,7 @@ async function main() {
 
       if (result.actionable && result.kind !== "none") {
         matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+        investigated.add(conversation.session_id);
       }
     }
 
@@ -201,7 +223,10 @@ async function main() {
       const lastActiveAt = conversation.active?.last ?? conversation.created_at;
       const staleHours = (Date.now() - lastActiveAt) / (1000 * 60 * 60);
       const eligibleForAutoEscalate =
-        !record.autoEscalated && staleHours >= AUTO_ESCALATE_HOURS && staleHours <= AUTO_ESCALATE_MAX_HOURS;
+        !record.autoEscalated &&
+        !investigated.has(conversation.session_id) &&
+        staleHours >= AUTO_ESCALATE_HOURS &&
+        staleHours <= AUTO_ESCALATE_MAX_HOURS;
 
       if (!conversation._checkManualNote && !eligibleForAutoEscalate) continue;
 
@@ -218,10 +243,14 @@ async function main() {
       if (!transcript.trim()) continue;
 
       if (hasNewManualNote) {
+        // No investigated.has() guard here on purpose -- a human explicitly
+        // asking to (re-)investigate should always go through, same as the
+        // agent prompt's own "a fresh manual note can always re-trigger" rule.
         const result = await classifyAndRoute(accountConfig, conversation, transcript, { skipClassifier: true });
         record.manualNoteCount = manualNoteCount;
         if (result.repo) {
           matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+          investigated.add(conversation.session_id);
           manualEscalations++;
           console.log(`[${accountKey}] ${conversation.session_id}: manual "@tg-autopilot investigate" note -> escalated to ${result.repo}`);
         } else {
@@ -232,6 +261,7 @@ async function main() {
         record.autoEscalated = true; // fires at most once, whether actionable or not
         if (result.repo && result.actionable && result.kind !== "none") {
           matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+          investigated.add(conversation.session_id);
           autoEscalations++;
           console.log(`[${accountKey}] ${conversation.session_id}: stale ${staleHours.toFixed(1)}h, classifier agrees -> escalated to ${result.repo}`);
         }
@@ -256,12 +286,16 @@ async function main() {
   await writeFile("matrix.json", JSON.stringify(dedupedMatrix));
   await writeFile("state/cursor.json", JSON.stringify({ last_checked: runStartedAt }, null, 2) + "\n");
   await writeFile("state/escalated.json", JSON.stringify(escalated, null, 2) + "\n");
+  // Bound growth the same way as active-notified.json -- a session doesn't
+  // need to stay in here forever, just long enough to survive its own
+  // resolve/reopen cycles.
+  await writeFile("state/investigated.json", JSON.stringify([...investigated].slice(-2000)));
 
   if (GITHUB_STEP_SUMMARY) {
     const lines = [
       `### Crisp triage — Stage 1`,
       ``,
-      `Fetched: ${totalFetched} · Actionable: ${dedupedMatrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled}${duplicatesRemoved ? ` · Duplicate session_id across loops (deduped): ${duplicatesRemoved}` : ""}`,
+      `Fetched: ${totalFetched} · Actionable: ${dedupedMatrix.length} · Unmapped (skipped): ${skippedUnmapped.length} · Already handled while active (skipped): ${alreadyHandled} · Already fully investigated before (skipped): ${alreadyInvestigated}${duplicatesRemoved ? ` · Duplicate session_id across loops (deduped): ${duplicatesRemoved}` : ""}`,
       `Escalated from active: ${manualEscalations} manual, ${autoEscalations} auto (stale ${AUTO_ESCALATE_HOURS}h–${AUTO_ESCALATE_MAX_HOURS}h)`,
     ];
     if (skippedUnmapped.length) {

@@ -8,6 +8,7 @@ Files added for this phase, all in `wpeverest/.github`:
 - `scripts/crisp-fetch-transcript.mjs`, `scripts/build-prompt.mjs`, `scripts/crisp-post-note.mjs` — Stage 2 helpers
 - `prompts/crisp-triage-agent.md` — the agent's instructions
 - `state/cursor.json` — persisted "last checked" timestamp
+- `state/investigated.json` — session_ids that already went through a full Stage 2 investigation at least once, so a conversation that resolves, gets reopened by the customer, and resolves again doesn't get reinvestigated (and re-noted) every cycle
 - `config/inbox-to-repo.json` — Crisp inbox → GitHub repo mapping (**you must populate this**)
 
 ## 1. Crisp API tokens — one per account, not one total
@@ -67,6 +68,10 @@ Normally, full investigation only ever runs on a *resolved* conversation — see
 - **Automatic**: a conversation open longer than **12 hours** (measured from `active.last`, not `created_at` -- a conversation that resolved and later reopened after a long gap shouldn't look artificially old) gets checked by the same cheap classifier used for resolved conversations. If it agrees this looks like a real bug/feature, it's escalated the same way. This fires **at most once per conversation** automatically, and never for a conversation older than **30 days** (`AUTO_ESCALATE_MAX_HOURS` in `crisp-classify.mjs`) -- a backlog that's sat untouched that long is treated as intentionally left open, not a scan miss. If something changes later and it genuinely needs another look, that's what the manual note is for.
 
 Both paths write to `state/escalated.json` (also committed) so neither one repeats itself needlessly.
+
+**Separately**, `state/investigated.json` (also committed) tracks every session_id that has ever completed a full Stage 2 investigation, from *any* path (resolved, auto-escalation, or manual note). The resolved-conversation loop and the auto-escalation branch both skip a session already in this set — otherwise a conversation that resolves, gets reopened by the customer, and resolves again looks like a brand-new resolved conversation every cycle, with no memory that it was already fully investigated (confirmed for real: one conversation was reinvestigated 6 times over 3 days, posting a fresh "not a real defect" note each time — `crisp-post-note.mjs`'s dedup only catches a repeated note that references the *same GitHub issue URL*, so a no-issue conclusion is never deduped). The manual-note path deliberately does **not** check this set — a human explicitly asking to (re-)investigate should always go through.
+
+This does not retroactively clean up notes already posted before the fix, and it does mean a conversation that reopens with a genuinely new, unrelated problem after already being investigated once won't get a second automatic look — only a fresh manual `@tg-autopilot investigate` note reaches it at that point.
 
 ## 4d. Investigate-job concurrency and OpenAI rate limits
 
