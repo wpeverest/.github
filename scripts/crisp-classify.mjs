@@ -8,6 +8,9 @@
 // Also escalates a still-open conversation straight to full investigation,
 // without waiting for it to resolve, in two cases:
 //   - a private note asks for it explicitly: "@tg-autopilot investigate"
+//     (found via Crisp's own text search, not the active-conversation page
+//     cap below -- a manual trigger should never depend on how many other
+//     conversations were touched more recently)
 //   - it's been open AUTO_ESCALATE_HOURS-AUTO_ESCALATE_MAX_HOURS and the
 //     classifier agrees it looks real -- fires at most once automatically;
 //     a fresh manual note can always re-trigger, the time-based rule can't.
@@ -26,6 +29,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import {
   fetchResolvedConversationsSince,
   fetchActiveConversations,
+  searchConversationsForManualTrigger,
   getInboxKey,
   fetchTranscript,
   fetchRawMessages,
@@ -204,6 +208,21 @@ async function main() {
       const lastActiveAt = conversation.active?.last ?? conversation.created_at;
       conversation._checkManualNote = lastActiveAt > lastCheckedMs;
     });
+
+    // fetchActiveConversations' page cap can bury a manually-noted
+    // conversation on a high-volume account (confirmed for real on
+    // THEMEGRILL) -- search directly for the trigger phrase so a manual note
+    // is never missed regardless of the cap or how many other conversations
+    // were touched more recently. Anything found only here (not already in
+    // activeConversations) is appended and always checked this run.
+    const seenSessionIds = new Set(activeConversations.map((c) => c.session_id));
+    const manualTriggerHits = await searchConversationsForManualTrigger(creds, "@tg-autopilot investigate");
+    for (const hit of manualTriggerHits) {
+      if (seenSessionIds.has(hit.session_id)) continue;
+      hit._checkManualNote = true;
+      activeConversations.push(hit);
+      seenSessionIds.add(hit.session_id);
+    }
 
     for (const conversation of activeConversations) {
       const record = escalated[conversation.session_id] ?? { autoEscalated: false, manualNoteCount: 0 };
