@@ -4,9 +4,12 @@
 //
 // A conversation investigated more than once (repeat auto-escalation, or a
 // fresh manual note) can get the same "matched/created issue #N" note
-// posted repeatedly. Skip if an existing note already contains the same
-// issue URL -- keyed on the URL, not exact wording, since the agent
-// free-writes each note. A note with no issue URL isn't deduped this way.
+// posted repeatedly. Skip only if EVERY issue URL in the new note is already
+// mentioned in an existing note -- a note can now reference two issues (a
+// bug and a feature request found in the same conversation), and one of
+// them being new information is enough reason to still post. Keyed on the
+// URL, not exact wording, since the agent free-writes each note. A note
+// with no issue URL at all isn't deduped this way.
 import { postNote, fetchRawMessages } from "./crisp-client.mjs";
 
 const [sessionId, note] = process.argv.slice(2);
@@ -21,16 +24,15 @@ const creds = {
   websiteId: process.env.CRISP_WEBSITE_ID,
 };
 
-const issueUrlMatch = note.match(/https:\/\/github\.com\/[^\s)]+\/issues\/\d+/);
+const issueUrls = [...note.matchAll(/https:\/\/github\.com\/[^\s)]+\/issues\/\d+/g)].map((m) => m[0]);
 
 async function main() {
-  if (issueUrlMatch) {
+  if (issueUrls.length > 0) {
     const messages = await fetchRawMessages(creds, sessionId);
-    const alreadyNoted = messages.some(
-      (m) => m.type === "note" && (m.content ?? "").includes(issueUrlMatch[0])
-    );
-    if (alreadyNoted) {
-      console.log(`Skipping note -- ${issueUrlMatch[0]} already mentioned in an existing note on conversation ${sessionId}`);
+    const existingNotes = messages.filter((m) => m.type === "note").map((m) => m.content ?? "");
+    const allAlreadyNoted = issueUrls.every((url) => existingNotes.some((content) => content.includes(url)));
+    if (allAlreadyNoted) {
+      console.log(`Skipping note -- all referenced issue(s) (${issueUrls.join(", ")}) already mentioned in an existing note on conversation ${sessionId}`);
       return;
     }
   }
