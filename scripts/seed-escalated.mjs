@@ -9,7 +9,7 @@
 // Only blocks the AUTO-escalation path (crisp-classify.mjs checks
 // record.autoEscalated). Does not touch the resolved-conversation loop
 // (already forward-only via cursor.json, nothing to skip there) and does not
-// block a manual "@tg-autopilot investigate" note on any of these
+// block a manual "!tg-autopilot investigate" note on any of these
 // conversations -- that path never checks autoEscalated.
 import { readFile, writeFile } from "node:fs/promises";
 import { fetchActiveConversations, credsForAccount } from "./crisp-client.mjs";
