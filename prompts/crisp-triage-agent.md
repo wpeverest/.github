@@ -53,9 +53,9 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
 
 4. **If investigation concludes there is no real product defect and no genuine feature request** (client-side misconfiguration, user error, already fixed, or you genuinely cannot substantiate anything from the code) — note that in the conversation too (step 5), instead of filing anything.
 
-5. **Always leave exactly one note back in the support conversation**, summarizing everything you found -- this step runs every time, no exceptions, and covers all items from steps 2-4 together, not one note per item:
+5. **Always leave exactly one note back in the support conversation**, summarizing everything you found -- this step runs every time, no exceptions, and covers all items from steps 2-4 together, not one note per item. Write the note to a file first and pass that file, the same way you already do for the issue body -- a multi-line note surviving as a single inline shell argument is fragile (a literal `\n` in the argument does not become a real newline):
    ```
-   node "$HOME/tg-autopilot/crisp-post-note.mjs" {{SESSION_ID}} "<note>"
+   node "$HOME/tg-autopilot/crisp-post-note.mjs" {{SESSION_ID}} @<path-to-note-file>
    ```
    Format the note as:
    ```
