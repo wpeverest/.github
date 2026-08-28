@@ -133,7 +133,12 @@ jobs:
             --model "openai/${{ vars.INVESTIGATE_MODEL || 'gpt-5-mini' }}" \
             --auto \
             --format json \
-            | tee "$GITHUB_STEP_SUMMARY" > /tmp/opencode-output.json
+            > /tmp/opencode-output.json
+          # The raw NDJSON stream is unreadable as a step summary (hundreds
+          # of tool-call events, full file contents, grep dumps) -- write a
+          # human-readable one instead, and keep the raw file around for the
+          # completion check below and for real debugging via job logs.
+          node "$GITHUB_WORKSPACE/.bot-tools/scripts/summarize-investigation.mjs" /tmp/opencode-output.json >> "$GITHUB_STEP_SUMMARY"
           if ! grep -q "crisp-post-note.mjs" /tmp/opencode-output.json; then
             echo "::error::Agent never called crisp-post-note.mjs -- it did not complete its mandatory last step (likely died mid-run, e.g. an unrecovered rate limit). Session ${{ matrix.session_id }} was left with no GitHub-side outcome and no note back to the customer."
             exit 1
