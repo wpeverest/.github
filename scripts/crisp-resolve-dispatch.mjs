@@ -44,7 +44,19 @@ async function main() {
       continue; // not yet credentialed -- can't be the source
     }
 
-    const messages = await fetchRawMessages(creds, TARGET_SESSION_ID);
+    // A session that belongs to a different account isn't just an empty
+    // result -- Crisp returns a hard 404 "conversation_not_found" for it,
+    // which fetchRawMessages lets propagate as a thrown error. Confirmed
+    // for real: without this catch, the first configured account tried
+    // (whichever happens to not own the session) crashes the whole script
+    // before ever reaching the account that actually does.
+    let messages;
+    try {
+      messages = await fetchRawMessages(creds, TARGET_SESSION_ID);
+    } catch (err) {
+      console.log(`[${accountKey}] not this account's conversation (${err.message})`);
+      continue;
+    }
     if (messages.length === 0) continue; // not this account's conversation
 
     const transcript = messages
