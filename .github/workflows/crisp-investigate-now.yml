@@ -1,0 +1,86 @@
+# Instant single-session path: investigate exactly ONE Crisp conversation
+# right now, bypassing the scheduled scan entirely. Fired by an n8n workflow
+# watching Crisp's webhooks for a "!tg-autopilot investigate" note (n8n
+# bridges Crisp's webhook to this repository_dispatch, since Crisp can't set
+# the Authorization header GitHub's API requires). workflow_dispatch is also
+# available for manual testing without needing the n8n side wired up.
+name: Crisp investigate now
+
+on:
+  repository_dispatch:
+    types: [crisp-investigate]
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Crisp session_id to investigate immediately"
+        required: true
+        type: string
+
+concurrency:
+  # Shares crisp-triage.yml's own group: both commit to the same
+  # state/escalated.json and state/investigated.json files, and an instant
+  # trigger landing mid-scan would otherwise race the same "Commit advanced
+  # state" retry logic against itself.
+  group: crisp-triage
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve session to a repo
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BOT_TOKEN }} # needs contents:write to commit updated state
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve
+        id: resolve
+        env:
+          TARGET_SESSION_ID: ${{ github.event.client_payload.session_id || inputs.session_id }}
+          CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
+          CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
+          CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
+          CRISP_THEMEGRILL_IDENTIFIER: ${{ secrets.CRISP_THEMEGRILL_IDENTIFIER }}
+          CRISP_THEMEGRILL_KEY: ${{ secrets.CRISP_THEMEGRILL_KEY }}
+          CRISP_THEMEGRILL_WEBSITE_ID: ${{ vars.CRISP_THEMEGRILL_WEBSITE_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLASSIFY_MODEL: ${{ vars.CLASSIFY_MODEL || 'gpt-5-mini' }}
+        run: |
+          node scripts/crisp-resolve-dispatch.mjs
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+
+      # Same retry pattern as crisp-triage.yml's own state commit -- see that
+      # file's comment for why `-X ours` and why `set +e` matters here.
+      - name: Commit advanced state
+        run: |
+          set +e
+          git config user.name "tg-autopilot"
+          git config user.email "tg-autopilot@users.noreply.github.com"
+          git add state/escalated.json state/investigated.json
+          git diff --cached --quiet || git commit -m "Advance Crisp triage state (instant trigger) [skip ci]"
+          for attempt in 1 2 3 4 5; do
+            git push && exit 0
+            echo "Push rejected (attempt $attempt/5), rebasing onto origin/master (preferring our state on conflict) and retrying..."
+            git fetch origin master
+            if ! git rebase -X ours origin/master; then
+              echo "::error::Rebase failed outright (not just a content conflict) -- aborting"
+              git rebase --abort
+              exit 1
+            fi
+          done
+          echo "::error::Failed to push advanced state after 5 attempts"
+          exit 1
+
+  investigate:
+    needs: resolve
+    if: needs.resolve.outputs.matrix != '[]'
+    uses: ./.github/workflows/crisp-investigate-job.yml
+    with:
+      matrix: ${{ needs.resolve.outputs.matrix }}
+    secrets: inherit
