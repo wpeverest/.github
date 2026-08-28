@@ -10,13 +10,25 @@
 // them being new information is enough reason to still post. Keyed on the
 // URL, not exact wording, since the agent free-writes each note. A note
 // with no issue URL at all isn't deduped this way.
+import { readFile } from "node:fs/promises";
 import { postNote, fetchRawMessages } from "./crisp-client.mjs";
 
-const [sessionId, note] = process.argv.slice(2);
-if (!sessionId || !note) {
-  console.error('Usage: crisp-post-note.mjs <session_id> "<note text>"');
+const [sessionId, noteArg] = process.argv.slice(2);
+if (!sessionId || !noteArg) {
+  console.error('Usage: crisp-post-note.mjs <session_id> "<note text>"  (or: crisp-post-note.mjs <session_id> @<path-to-note-file>)');
   process.exit(1);
 }
+
+// `@path` (curl's own convention) reads the note from a file instead of the
+// argument itself -- a real multi-line note surviving as a single shell
+// argument is fragile (confirmed for real: the agent embedded literal `\n`
+// text instead of actual newlines, since bash doesn't interpret `\n` inside
+// double quotes). A file has no such quoting problem.
+const rawNote = noteArg.startsWith("@") ? await readFile(noteArg.slice(1), "utf8") : noteArg;
+
+// Safety net regardless of source: normalize literal backslash-n/backslash-
+// r-n sequences to real newlines, in case they made it through anyway.
+const note = rawNote.replace(/\\r\\n|\\n/g, "\n");
 
 const creds = {
   identifier: process.env.CRISP_IDENTIFIER,
