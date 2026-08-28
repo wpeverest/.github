@@ -7,7 +7,7 @@
 //
 // Also escalates a still-open conversation straight to full investigation,
 // without waiting for it to resolve, in two cases:
-//   - a private note asks for it explicitly: "@tg-autopilot investigate"
+//   - a private note asks for it explicitly: "!tg-autopilot investigate"
 //     (found via Crisp's own text search, not the active-conversation page
 //     cap below -- a manual trigger should never depend on how many other
 //     conversations were touched more recently)
@@ -216,7 +216,7 @@ async function main() {
     // were touched more recently. Anything found only here (not already in
     // activeConversations) is appended and always checked this run.
     const seenSessionIds = new Set(activeConversations.map((c) => c.session_id));
-    const manualTriggerHits = await searchConversationsForManualTrigger(creds, "@tg-autopilot investigate");
+    const manualTriggerHits = await searchConversationsForManualTrigger(creds, "!tg-autopilot investigate");
     for (const hit of manualTriggerHits) {
       if (seenSessionIds.has(hit.session_id)) continue;
       hit._checkManualNote = true;
@@ -260,7 +260,7 @@ async function main() {
           matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
           investigated.add(conversation.session_id);
           manualEscalations++;
-          console.log(`[${accountKey}] ${conversation.session_id}: manual "@tg-autopilot investigate" note -> escalated to ${result.repo}`);
+          console.log(`[${accountKey}] ${conversation.session_id}: manual "!tg-autopilot investigate" note -> escalated to ${result.repo}`);
         } else {
           skippedUnmapped.push({ account: accountKey, session_id: conversation.session_id, inboxKey: result.unmappedKey });
         }

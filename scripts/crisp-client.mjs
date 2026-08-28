@@ -146,7 +146,7 @@ export async function fetchTranscript(creds, sessionId) {
 // A count, not an attempt to identify "which" note -- two notes can have
 // identical text, so callers track the count they last actioned per session
 // and treat a higher count as a genuinely new note.
-export function countManualTriggerNotes(messages, phrase = "@tg-autopilot investigate") {
+export function countManualTriggerNotes(messages, phrase = "!tg-autopilot investigate") {
   return messages.filter(
     (m) => m.type === "note" && (m.content ?? "").toLowerCase().includes(phrase.toLowerCase())
   ).length;
