@@ -1,0 +1,27 @@
+# Keeps every repo listed in config/copilot-review-repos.json equipped with
+# the Copilot-review-on-comment workflow. Onboarding a new product repo is
+# just adding its name to that config file -- the next run (scheduled, or
+# triggered manually below) opens a PR for it. Safe to re-run indefinitely:
+# a repo that already has the file is skipped every time.
+name: Propagate Copilot review workflow
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday morning -- this only ever needs to catch newly-added config entries
+  workflow_dispatch:
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Propagate
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          BOT_TOKEN_THEMEGRILL: ${{ secrets.BOT_TOKEN_THEMEGRILL }}
+        run: node scripts/propagate-copilot-review.mjs
