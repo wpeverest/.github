@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: "20"
 
+      - run: npm install
+
       - name: Propagate
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}

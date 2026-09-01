@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// Ensures every repo listed in config/copilot-review-repos.json has the
-// Copilot-review-on-comment caller workflow, with the CORRECT content --
-// not just present. Safe to re-run indefinitely: a repo whose file already
-// matches the canonical content is skipped; a repo missing it, or with
-// stale/wrong content (e.g. a fix like this one), gets a PR.
+// Ensures every repo listed in config/copilot-review-repos.json has (a) the
+// Copilot-review-on-comment caller workflow, with the CORRECT content, and
+// (b) its own repo-level BOT_TOKEN secret (see setRepoSecret below for why
+// repo-level, not relying on the org-level secret). The workflow-file part
+// is safe to re-run indefinitely: a repo whose file already matches the
+// canonical content is skipped; a repo missing it, or with stale/wrong
+// content (e.g. a fix like this one), gets a PR. The secret is simply
+// re-set on every run -- cheap, and always correct regardless of any
+// manual changes made to the org-level secret in the meantime.
 //
 // Deliberately opt-in via an explicit list, not "every repo in the org":
 // most repos in both orgs are docs/marketing/tooling, not products that
@@ -11,8 +15,10 @@
 // those apart -- a human still decides once per repo, but only by adding a
 // name to a list, not by hand-authoring a workflow file.
 import { readFile } from "node:fs/promises";
+import sodium from "libsodium-wrappers";
 
 const CALLER_WORKFLOW_PATH = ".github/workflows/copilot-review-on-comment.yml";
+const REPO_SECRET_NAME = "BOT_TOKEN";
 const BRANCH_NAME = "tg-autopilot/add-copilot-review-on-comment";
 
 // The deployed file, not the docs/copilot-review-on-comment.caller.yml
@@ -53,6 +59,33 @@ async function gh(org, path, options = {}) {
     },
   });
   return res;
+}
+
+// Sets a REPO-LEVEL secret directly, rather than relying on the org-level
+// one. Confirmed for real: GitHub Free plan org secrets cannot reach
+// private repositories at all -- the repository-access setting silently
+// only offers "Public repositories" for a Free-plan org, so a private repo
+// like a themegrill Pro product never actually receives the org secret's
+// value (it resolves as an empty string, not an error). A repo-level
+// secret has no such restriction on any plan, and always takes precedence
+// over an org secret of the same name, so this works unconditionally --
+// no dependency on org plan tier or repo visibility ever again.
+async function setRepoSecret(org, repo) {
+  const value = tokenForOrg(org);
+  const keyRes = await gh(org, `/repos/${org}/${repo}/actions/secrets/public-key`);
+  if (!keyRes.ok) throw new Error(`Failed to fetch public key for ${org}/${repo}: ${keyRes.status} ${await keyRes.text()}`);
+  const { key, key_id } = await keyRes.json();
+
+  await sodium.ready;
+  const encryptedBytes = sodium.crypto_box_seal(sodium.from_string(value), sodium.from_base64(key, sodium.base64_variants.ORIGINAL));
+  const encryptedValue = sodium.to_base64(encryptedBytes, sodium.base64_variants.ORIGINAL);
+
+  const putRes = await gh(org, `/repos/${org}/${repo}/actions/secrets/${REPO_SECRET_NAME}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ encrypted_value: encryptedValue, key_id }),
+  });
+  if (!putRes.ok) throw new Error(`Failed to set repo secret on ${org}/${repo}: ${putRes.status} ${await putRes.text()}`);
 }
 
 // Returns null if the file doesn't exist, otherwise its decoded content.
@@ -134,6 +167,7 @@ async function main() {
   for (const [org, repos] of Object.entries(config)) {
     for (const repo of repos) {
       try {
+        await setRepoSecret(org, repo);
         const existing = await getExistingContent(org, repo);
         if (existing === CALLER_WORKFLOW_CONTENT) {
           console.log(`[${org}/${repo}] already up to date -- skipping`);
