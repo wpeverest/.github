@@ -15,7 +15,12 @@
 // those apart -- a human still decides once per repo, but only by adding a
 // name to a list, not by hand-authoring a workflow file.
 import { readFile } from "node:fs/promises";
-import sodium from "libsodium-wrappers";
+import { createRequire } from "node:module";
+
+// libsodium-wrappers' own ESM build is broken (a real, known packaging bug
+// -- its .mjs entry imports a file that doesn't exist in the published
+// package). Load it via its CJS build instead, which works fine.
+const sodium = createRequire(import.meta.url)("libsodium-wrappers");
 
 const CALLER_WORKFLOW_PATH = ".github/workflows/copilot-review-on-comment.yml";
 const REPO_SECRET_NAME = "BOT_TOKEN";
