@@ -5,6 +5,9 @@
     "USER_REGISTRATION": {
       "repo": "wpeverest/user-registration-pro"
     },
+    "EVEREST_FORMS": {
+      "repo": "wpeverest/everest-forms-pro"
+    },
     "THEMEGRILL": {
       "products": {
         "accelerate": { "free": "themegrill/accelerate", "pro": "themegrill/accelerate-pro" },
