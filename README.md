@@ -46,6 +46,29 @@ Confirmed for real, twice, the same way both times: something worked perfectly o
 
 **When adding a brand new secret to this system in the future**: assume it will need the same repo-level propagation treatment for every private repo in both orgs, and build that in from the start rather than discovering it the same way twice more. `scripts/propagate-pr-build-zip-secrets.mjs` is the current reference implementation (loops both orgs, sets repo-level secrets unconditionally for simplicity rather than checking visibility per repo).
 
+## Fine-grained PAT permissions are more granular than they look
+
+A fine-grained PAT's permission list has several categories that sound related but are checked completely independently — missing one gives a 403 that looks like a general access problem, not a missing-scope problem:
+
+- **Contents** — reading/writing ordinary files.
+- **Workflows** — a *separate* permission specifically for writing to `.github/workflows/*`. `Contents: Read and write` alone is not enough to add or edit a workflow file via the API; you'll get "Resource not accessible by personal access token" on that path specifically, while every other file write succeeds fine.
+- **Secrets** — also separate, needed for both `GET .../actions/secrets/public-key` and `PUT .../actions/secrets/{name}`. Missing this fails the exact repo-level-secret-propagation pattern described above.
+- **Actions** — needed for triggering `repository_dispatch` and reading/managing workflow runs.
+
+Confirmed for real: the propagation PATs needed all four added one at a time across separate failures before the Copilot-review and pr-build-zip rollouts worked end to end. When a new script needs to touch workflow files or secrets on a repo it hasn't touched before, check all four up front instead of discovering each 403 one at a time.
+
+## `gh api`/`gh` CLI caches responses — don't trust an immediate re-check
+
+The `gh` CLI (both `gh api` and commands built on it) can serve a cached response for a `GET` shortly after a `PUT`/`DELETE` you just made — confirmed for real while debugging a Copilot-reviewer issue: removing then re-adding a PR reviewer showed the *old* state on the very next `gh api .../requested_reviewers` call, making a real fix look like it hadn't worked. A plain `curl` (or waiting and retrying) bypasses this. When verifying that a mutation actually took effect — especially seconds after making it — prefer a fresh `curl` over `gh api` if the result looks stale or contradicts what should have just changed.
+
+## A bot's own comment must never be able to re-trigger its own workflow
+
+Any `issue_comment`-triggered workflow that might post its *own* comment back (a status update, an error notice, a "try again" message) needs to make sure that comment can't match its own trigger phrase — otherwise it can loop forever. Confirmed for real on `copilot-review-on-comment.yml`: an early version's failure-notice comment said "try commenting `@tg-autopilot review` again," which contains the trigger phrase itself, so posting it re-triggered the workflow, which could fail again, post the notice again, indefinitely (caught after ~20 runs on one PR). The fix that actually matters is excluding comments authored by `tg-autopilot` itself from the trigger condition — not just rewording the message, since any future message could reintroduce the same trap by accident.
+
+## Copilot code-review requests are genuinely flaky/slow at the platform level
+
+`gh pr edit --add-reviewer @copilot` (what `copilot-review-on-comment.yml` uses) can take well over a minute between the request "succeeding" and Copilot actually showing up as a reviewer — and can occasionally need a second attempt to register at all. This isn't a bug in this repo's workflow; it's confirmed inconsistent GitHub-platform-side behavior. Don't add a quick success/fail check here without a generous polling window — an earlier version that gave up after ~25 seconds reported false failures on requests that were quietly still working in the background. See the "Request Copilot review" step's own comments in `copilot-review-on-comment.yml` for the current polling approach.
+
 ## Debugging a run
 
 - **Actions tab** on this repo (`wpeverest/.github`) → find the workflow run → each job's logs are per-conversation/per-PR, not aggregated.
