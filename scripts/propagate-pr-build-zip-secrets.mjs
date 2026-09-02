@@ -1,24 +1,19 @@
 #!/usr/bin/env node
-// Copies ARTIFACTS_KEY and ARTIFACTS_SECRET (the shared S3-compatible bucket
-// credentials pr-build-zip.yml uploads to) down as REPO-LEVEL secrets on
-// every themegrill repo listed in config/copilot-review-repos.json.
+// Copies ARTIFACTS_KEY and ARTIFACTS_SECRET -- the shared S3 bucket
+// credentials pr-build-zip.yml uploads to -- down as REPO-LEVEL secrets on
+// every themegrill repo in config/copilot-review-repos.json.
 //
-// wpeverest repos need no equivalent step: they call the reusable workflow
-// with `secrets: inherit`, and the org-level ARTIFACTS_KEY/ARTIFACTS_SECRET
-// already work there (confirmed for real on wpeverest/user-registration).
-// themegrill can't do the same for two independent reasons: (1) inherit only
-// works same-org, and wpeverest/.github (where the reusable workflow lives)
-// is a different org; (2) even an explicit `secrets: ARTIFACTS_KEY: ...`
-// pass-through requires the CALLING repo to already have that secret --
-// which a themegrill repo doesn't, since it's a wpeverest org secret --
-// and themegrill's GitHub Free plan can't fix that with an org secret of
-// its own either (confirmed for real with BOT_TOKEN: Free-plan org secrets
-// silently never reach private repos). A repo-level secret sidesteps both.
+// wpeverest repos don't need this: they call the reusable workflow with
+// `secrets: inherit`, and the org-level secrets already reach them fine.
+// themegrill can't use that path: inherit only works same-org (the reusable
+// workflow lives in wpeverest/.github), and an org secret of its own
+// wouldn't help either -- themegrill's Free plan silently blocks org
+// secrets from reaching private repos (confirmed for real with BOT_TOKEN).
+// A repo-level secret sidesteps both problems.
 //
-// One shared bucket serves both orgs (S3 access isn't org-scoped) -- this
-// script just makes sure every themegrill repo has its own copy of the same
-// two credential values, read here from this script's own env (itself
-// sourced from wpeverest's existing org secrets), never hardcoded.
+// Both orgs share one bucket; this just gives every themegrill repo its own
+// copy of the same two values, read from this script's own env (itself
+// sourced from wpeverest's existing org secrets) -- never hardcoded.
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
