@@ -26,8 +26,12 @@ jobs:
   request-review:
     # Only PR comments (issue_comment fires for both issues and PR conversation
     # comments; github.event.issue.pull_request only exists on the PR case).
+    # Excluding the bot's own comments is required, not just tidy: its
+    # failure-notice text below tells people to retry the trigger phrase, so
+    # without this guard that notice re-triggers itself forever.
     if: |
       github.event.issue.pull_request != null &&
+      github.event.comment.user.login != 'tg-autopilot' &&
       contains(github.event.comment.body, inputs.trigger-phrase)
     runs-on: ubuntu-latest
     steps:
@@ -93,7 +97,7 @@ jobs:
 
           echo "::warning::Copilot review request did not land after 5 attempts on $REPO#$PR. This is a known intermittent GitHub platform issue, not a config problem."
           gh api "repos/$REPO/issues/$PR/comments" \
-            -f body="Copilot review request didn't go through after several attempts (this is an intermittent GitHub-side issue). Try commenting \`@tg-autopilot review\` again." --silent
+            -f body="Copilot review request didn't go through after several attempts (this is an intermittent GitHub-side issue). Please retry the review request in a bit." --silent
 
       - name: Reply if not authorized
         if: steps.perm.outputs.authorized == 'false'
