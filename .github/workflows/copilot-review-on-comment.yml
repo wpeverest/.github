@@ -69,10 +69,16 @@ jobs:
             -f content='eyes' --silent
 
       # `gh pr edit --add-reviewer @copilot` is a confirmed-flaky GitHub
-      # platform call: it can return success while silently requesting no
-      # one, or requesting the wrong account, instead of Copilot. Verify the
-      # bot actually landed in requested_reviewers and retry a few times
-      # before giving up, since retrying has empirically cleared it.
+      # platform call, but the failure mode that actually matters here is
+      # latency, not silent no-ops: Copilot can take well over a minute
+      # between the request landing and the review showing up at all, so a
+      # quick handful of retries just reports false failures while Copilot
+      # is still legitimately working in the background (confirmed on
+      # themegrill/zakra#350 -- reported "failed" after 5x5s, then finished
+      # and posted a real review a minute later). So: request once, then
+      # poll for a while for either a pending request or a completed
+      # review, only re-issuing the request if nothing shows up for a
+      # while.
       - name: Request Copilot review
         if: steps.perm.outputs.authorized == 'true'
         env:
@@ -82,22 +88,29 @@ jobs:
           PR="${{ github.event.issue.number }}"
           REPO="${{ github.repository }}"
 
-          for attempt in 1 2 3 4 5; do
-            gh pr edit "$PR" --repo "$REPO" --add-reviewer @copilot || true
+          copilot_present() {
+            gh api "repos/$REPO/pulls/$PR/requested_reviewers" --jq '.users[].login' | grep -qx 'copilot-pull-request-reviewer\[bot\]' && return 0
+            gh api "repos/$REPO/pulls/$PR/reviews" --jq '.[].user.login' | grep -qx 'copilot-pull-request-reviewer\[bot\]' && return 0
+            return 1
+          }
 
-            REQUESTED=$(gh api "repos/$REPO/pulls/$PR/requested_reviewers" --jq '.users[].login')
-            if echo "$REQUESTED" | grep -qx 'copilot-pull-request-reviewer\[bot\]'; then
-              echo "Copilot review requested successfully on attempt $attempt."
+          gh pr edit "$PR" --repo "$REPO" --add-reviewer @copilot || true
+
+          for check in $(seq 1 18); do
+            if copilot_present; then
+              echo "Copilot review request confirmed after $((check * 10))s."
               exit 0
             fi
-
-            echo "Attempt $attempt did not land a Copilot review request (got: ${REQUESTED:-none}); retrying..."
-            sleep 5
+            # Nothing landed after 60s -- the first request may have been a
+            # genuine no-op, so ask again once before continuing to wait.
+            if [ "$check" -eq 6 ]; then
+              echo "Nothing after 60s, re-issuing the request..."
+              gh pr edit "$PR" --repo "$REPO" --add-reviewer @copilot || true
+            fi
+            sleep 10
           done
 
-          echo "::warning::Copilot review request did not land after 5 attempts on $REPO#$PR. This is a known intermittent GitHub platform issue, not a config problem."
-          gh api "repos/$REPO/issues/$PR/comments" \
-            -f body="Copilot review request didn't go through after several attempts (this is an intermittent GitHub-side issue). Please retry the review request in a bit." --silent
+          echo "::warning::Copilot review request not confirmed after 3 minutes on $REPO#$PR. This is a known intermittent GitHub platform issue, not a config problem -- it may still complete later."
 
       - name: Reply if not authorized
         if: steps.perm.outputs.authorized == 'false'
