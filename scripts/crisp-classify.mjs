@@ -30,7 +30,6 @@ import {
   fetchResolvedConversationsSince,
   fetchActiveConversations,
   searchConversationsForManualTrigger,
-  fetchTranscript,
   fetchRawMessages,
   countManualTriggerNotes,
   credsForAccount,
@@ -90,13 +89,47 @@ async function main() {
         alreadyHandled++;
         continue;
       }
+
+      // Fetch raw messages (not just the transcript) so a manual note can be
+      // counted below without a second Crisp call.
+      const messages = await fetchRawMessages(creds, conversation.session_id);
+      const transcript = messages
+        .filter((m) => m.type === "text")
+        .map((m) => `${m.from === "user" ? "Customer" : "Agent"}: ${m.content}`)
+        .join("\n");
+      if (!transcript.trim()) continue;
+
+      // A manual "!tg-autopilot investigate" note always overrides the cheap
+      // classifier and the investigated guard, same as the active-conversation
+      // manual path below -- needed here too, since a conversation reaching
+      // this loop has already resolved and so would otherwise never be
+      // checked for the note at all (confirmed for real: a note added while
+      // still open was invisible here once the conversation resolved before
+      // this loop next ran, silently falling back to the cheap classifier's
+      // own verdict instead of the human's explicit request).
+      const record = escalated[conversation.session_id] ?? { autoEscalated: false, manualNoteCount: 0 };
+      const manualNoteCount = countManualTriggerNotes(messages);
+      const hasNewManualNote = manualNoteCount > record.manualNoteCount;
+
+      if (hasNewManualNote) {
+        const result = await classifyAndRoute(accountConfig, conversation, transcript, { skipClassifier: true });
+        record.manualNoteCount = manualNoteCount;
+        escalated[conversation.session_id] = record;
+        if (result.repo) {
+          matrix.push({ session_id: conversation.session_id, repo: result.repo, kind: result.kind, account: accountKey });
+          investigated.add(conversation.session_id);
+          manualEscalations++;
+          console.log(`[${accountKey}] ${conversation.session_id}: manual "!tg-autopilot investigate" note -> escalated to ${result.repo}`);
+        } else {
+          skippedUnmapped.push({ account: accountKey, session_id: conversation.session_id, inboxKey: result.unmappedKey });
+        }
+        continue;
+      }
+
       if (investigated.has(conversation.session_id)) {
         alreadyInvestigated++;
         continue;
       }
-
-      const transcript = await fetchTranscript(creds, conversation.session_id);
-      if (!transcript.trim()) continue;
 
       const result = await classifyAndRoute(accountConfig, conversation, transcript);
       if (!result.repo) {
