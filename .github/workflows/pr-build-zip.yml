@@ -186,6 +186,19 @@ jobs:
             yarn install --frozen-lockfile
           fi
 
+      # Several repos' release tasks shell out to `wp i18n make-pot` to
+      # generate translation files -- that WP-CLI subcommand only parses PHP
+      # source for translatable strings, it needs no database/WordPress
+      # install, so the standalone .phar is enough. Installed unconditionally
+      # (cheap, and every other build-command here simply won't call `wp` if
+      # it doesn't need it) rather than gated behind a new input -- confirmed
+      # for real as the sole blocker on half a dozen repos' builds.
+      - name: Install WP-CLI
+        run: |
+          curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          chmod +x wp-cli.phar
+          sudo mv wp-cli.phar /usr/local/bin/wp
+
       - name: Build distributable
         run: ${{ inputs.build-command }}
 
