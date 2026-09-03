@@ -166,9 +166,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-deps-
 
+      # --no-dev: a testable/distributable ZIP should never bundle dev/test
+      # tooling (phpunit, test helpers, ...) -- matches what every repo's own
+      # manual release automation already does (grunt's release task runs
+      # `composer install --no-dev` internally, see composer-install's own
+      # comment above). Also fixes a real, confirmed failure: everest-forms'
+      # composer.lock has dev-only packages (spatie/phpunit-watcher, etc.)
+      # locked to versions requiring PHP ^7.0, directly contradicting its own
+      # production dependencies needing 8.2+ -- no single PHP version could
+      # ever satisfy both, but the dev-only ones were never going to be
+      # needed in the built ZIP anyway.
       - name: Install Composer dependencies
         if: inputs.composer-install
-        run: composer install --prefer-dist --no-interaction --no-progress
+        run: composer install --prefer-dist --no-interaction --no-progress --no-dev
 
       - name: Install JS dependencies
         # eval, not a bare interpolation: when install-command is unset this
