@@ -109,7 +109,7 @@ function extractToolInvocation(scriptBody, tool) {
 // Core detection logic. Takes the raw file contents already fetched for one
 // repo and returns either a build config object or null (meaning: nothing
 // safe to auto-generate, skip and flag for a human).
-function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulpfileRaw, lockfiles }) {
+function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulpfileRaw, lockfiles, distignoreExists, repoName }) {
   const packageJson = packageJsonRaw ? JSON.parse(packageJsonRaw) : null;
   const composerJson = composerJsonRaw ? JSON.parse(composerJsonRaw) : null;
 
@@ -167,8 +167,15 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
     const gruntTask = gruntfileRaw ? extractToolInvocation(body, "grunt") : null;
     const gulpTask = gulpfileRaw ? extractToolInvocation(body, "gulp") : null;
 
+    // Tracks whether buildCommand already packages a zip itself (a grunt/gulp
+    // release task, matching the known-working examples) vs. is just an
+    // asset-compile script with no packaging step at all -- used below to
+    // decide whether the .distignore fallback packaging needs appending.
+    let packagesItself = false;
+
     if (gruntTask) {
       buildCommand = `${packageManager} exec grunt ${gruntTask}`;
+      packagesItself = true;
       // Composer running inside the Grunt task itself is the exact situation
       // documented in user-registration's caller file: its Gruntfile.js runs
       // `composer install --no-dev` as part of the release task, so this
@@ -184,9 +191,31 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
       // whatever came before the gulp invocation in the original script body
       // (that's part of the packaging pipeline, not an artifact of parsing).
       buildCommand = body;
+      packagesItself = true;
     } else {
-      // No recognizable grunt/gulp indirection -- run the npm script as-is.
+      // No recognizable grunt/gulp indirection -- this is very likely just an
+      // asset-compile script (wp-scripts build, webpack, ...) with no
+      // packaging step of its own. Confirmed for real across a wide sample
+      // of repos after the pnpm/PHP-version fixes: dozens still failed with
+      // "No ZIP matched 'release/*.zip'" because their "build" script
+      // genuinely never produces a zip anywhere -- packaging happens
+      // separately (a plugin's own custom release workflow, or nothing
+      // automated yet). See the .distignore fallback below for the one
+      // structural signal reliable enough to act on automatically.
       buildCommand = `${packageManager} run ${scriptName}`;
+    }
+
+    // Neither grunt nor gulp is doing the packaging, but the repo has a
+    // .distignore -- the exact convention user-registration-pro's own
+    // (manually written, pre-existing) release automation used: rsync the
+    // repo into a folder named after itself excluding .distignore's
+    // patterns, then zip that folder. This is a real structural signal
+    // confirmed present on the majority of repos that otherwise had no
+    // buildCommand producing a zip anywhere -- not a guess the way "assume
+    // release/*.zip" was.
+    if (!packagesItself && distignoreExists) {
+      buildCommand = `${buildCommand} && mkdir -p ${repoName} && rsync -rc --exclude-from=.distignore ./ ./${repoName} --delete --delete-excluded && zip -r ${repoName}.zip ${repoName}`;
+      zipGlob = `${repoName}.zip`;
     }
     break;
   }
@@ -210,9 +239,10 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
   // --- zip glob -------------------------------------------------------------
   // Only deviate from the shared default when we see explicit evidence (a
   // "dist" directory referenced in the same script body or Gruntfile/gulpfile)
-  // that the repo's own tooling drops the zip somewhere else.
+  // that the repo's own tooling drops the zip somewhere else. Skipped when
+  // the .distignore fallback above already set zipGlob explicitly.
   const combinedSource = [scripts.release, scripts.build, gruntfileRaw, gulpfileRaw].filter(Boolean).join("\n");
-  if (/dist\/.*\.zip/.test(combinedSource) && !/release\/.*\.zip/.test(combinedSource)) {
+  if (zipGlob === "release/*.zip" && /dist\/.*\.zip/.test(combinedSource) && !/release\/.*\.zip/.test(combinedSource)) {
     zipGlob = "dist/*.zip";
   }
 
@@ -272,7 +302,7 @@ async function processRepo(org, repo) {
   if (!repoRes.ok) throw new Error(`Failed to fetch ${org}/${repo}: ${repoRes.status} ${await repoRes.text()}`);
   const { default_branch: defaultBranch } = await repoRes.json();
 
-  const [packageJsonRaw, composerJsonRaw, gruntfileRaw, gulpfileRaw, pnpmLock, yarnLock, npmLock] = await Promise.all([
+  const [packageJsonRaw, composerJsonRaw, gruntfileRaw, gulpfileRaw, pnpmLock, yarnLock, npmLock, distignoreRaw] = await Promise.all([
     getFile(org, repo, "package.json"),
     getFile(org, repo, "composer.json"),
     getFile(org, repo, "Gruntfile.js"),
@@ -280,6 +310,7 @@ async function processRepo(org, repo) {
     getFile(org, repo, "pnpm-lock.yaml"),
     getFile(org, repo, "yarn.lock"),
     getFile(org, repo, "package-lock.json"),
+    getFile(org, repo, ".distignore"),
   ]);
 
   const config = detectBuildConfig({
@@ -288,6 +319,8 @@ async function processRepo(org, repo) {
     gruntfileRaw,
     gulpfileRaw,
     lockfiles: { pnpm: pnpmLock !== null, yarn: yarnLock !== null, npm: npmLock !== null },
+    distignoreExists: distignoreRaw !== null,
+    repoName: repo,
   });
 
   if (config === null) {
