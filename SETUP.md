@@ -1,6 +1,6 @@
 # ThemeGrill GitHub Bot — Phase 1 setup
 
-Files here go into a new repo **`wpeverest/.github`**:
+Files here go into a new repo **`themegrill/.github`**:
 
 - `.github/workflows/pr-build-zip.yml` — the reusable workflow (the bot's logic)
 - `.github/workflows/pr-build-zip.caller.yml` — template to copy into each consuming repo
@@ -64,9 +64,9 @@ domain fronts the bucket.
 **A private reusable workflow cannot be called from a different organization.**
 Access is limited to the same repository, the same org/user, or the same
 enterprise account. So `Masteriyo/*` repos cannot call a private
-`wpeverest/.github`. Options:
+`themegrill/.github`. Options:
 
-1. **Make `wpeverest/.github` public** (recommended). The workflow YAML holds no
+1. **Make `themegrill/.github` public** (recommended). The workflow YAML holds no
    secrets — secrets stay per-org and are passed by the caller via
    `secrets: inherit`. One copy for both orgs.
 2. If both orgs sit under one GitHub Enterprise account, internal visibility works.

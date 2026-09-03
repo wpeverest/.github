@@ -33,7 +33,7 @@ const BRANCH_NAME = "tg-autopilot/add-copilot-review-on-comment";
 //
 // `secrets: BOT_TOKEN: ...` explicitly, not `secrets: inherit` -- inherit
 // only works when the caller and the reusable workflow are in the SAME
-// organization. wpeverest/.github lives in wpeverest, so a themegrill
+// organization. themegrill/.github lives in wpeverest, so a themegrill
 // caller needs the secret passed by name to work across the org boundary.
 // Confirmed for real: every themegrill repo failed identically ("Secret
 // BOT_TOKEN is required, but not provided while calling") with `inherit`.
@@ -47,7 +47,7 @@ on:
 
 jobs:
   review:
-    uses: wpeverest/.github/.github/workflows/copilot-review-on-comment.yml@master
+    uses: themegrill/.github/.github/workflows/copilot-review-on-comment.yml@master
     secrets:
       BOT_TOKEN: \${{ secrets.BOT_TOKEN }}
 `;
@@ -150,7 +150,7 @@ async function syncWorkflow(org, repo) {
       title: "Add PR review automation",
       head: BRANCH_NAME,
       base: baseBranch,
-      body: "Adds the reusable PR-review workflow, called from wpeverest/.github. It requests Copilot as a reviewer when a PR opens, and lets accounts with write access or higher request a Copilot review by commenting `@tg-autopilot review`.",
+      body: "Adds the reusable PR-review workflow, called from themegrill/.github. It requests Copilot as a reviewer when a PR opens, and lets accounts with write access or higher request a Copilot review by commenting `@tg-autopilot review`.",
     }),
   });
   // 422 here typically means a PR from this branch already exists -- the

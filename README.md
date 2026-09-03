@@ -73,6 +73,6 @@ Any `issue_comment`-triggered workflow that might post its *own* comment back (a
 
 ## Debugging a run
 
-- **Actions tab** on this repo (`wpeverest/.github`) → find the workflow run → each job's logs are per-conversation/per-PR, not aggregated.
+- **Actions tab** on this repo (`themegrill/.github`) → find the workflow run → each job's logs are per-conversation/per-PR, not aggregated.
 - A failed "Investigate" job in Crisp triage can be safely re-run on its own from the run page (**Re-run job**) — it retries the same conversation, no state to reset first. See [PHASE2-SETUP.md § 4d](PHASE2-SETUP.md#4d-investigate-job-concurrency-and-openai-rate-limits) for why this happens and when it's expected.
 - Committed state (`state/*.json`) is the pipeline's only memory of what it's already processed. If a run looks like it's reprocessing something it shouldn't, check whether the "Commit advanced state" step actually succeeded on the prior run, not just whether the investigation itself did.

@@ -1,6 +1,6 @@
 # Phase 2 setup — Crisp → AI → GitHub issue
 
-Files added for this phase, all in `wpeverest/.github`:
+Files added for this phase, all in `themegrill/.github`:
 
 - `.github/workflows/crisp-triage.yml` — the hourly pipeline
 - `scripts/crisp-client.mjs` — shared Crisp REST client (auth, fetch, post)
@@ -45,7 +45,7 @@ Using OpenAI for now since that key already exists; not a hardcoded commitment �
 
 ## 3. Upgrade `tg-autopilot`'s PAT scope
 
-Phase 1's PAT has **Contents: Read-only**. Stage 1 needs to commit the advanced `cursor.json` back to `wpeverest/.github`, which needs **Contents: Read and write** on that specific repo. Edit the existing fine-grained PAT (or issue a new one) to add that scope.
+Phase 1's PAT has **Contents: Read-only**. Stage 1 needs to commit the advanced `cursor.json` back to `themegrill/.github`, which needs **Contents: Read and write** on that specific repo. Edit the existing fine-grained PAT (or issue a new one) to add that scope.
 
 ## 4. Populate `config/inbox-to-repo.json`
 

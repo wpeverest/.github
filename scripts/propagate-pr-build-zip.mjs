@@ -2,7 +2,7 @@
 // Ensures every repo listed in config/copilot-review-repos.json (same list
 // as the Copilot-review rollout -- reused deliberately, see that script's
 // comment on why it's an opt-in list, not "every repo in the org") has a
-// caller workflow for the reusable wpeverest/.github pr-build-zip.yml, which
+// caller workflow for the reusable themegrill/.github pr-build-zip.yml, which
 // builds a testable, installable ZIP on every PR and posts a download link.
 //
 // Unlike propagate-copilot-review.mjs, the content this script writes is NOT
@@ -15,7 +15,7 @@
 //
 // Also unlike the Copilot script, this one does NOT touch a repo that
 // already has .github/workflows/pr-build-zip.yml with a
-// `uses: wpeverest/.github/.github/workflows/pr-build-zip.yml` line in it --
+// `uses: themegrill/.github/.github/workflows/pr-build-zip.yml` line in it --
 // a human tuned that file by hand (like user-registration's), and our
 // heuristics are not trusted to safely override deliberate human tuning.
 // This is a one-shot bootstrap per repo, not an ongoing sync.
@@ -23,7 +23,7 @@ import { readFile } from "node:fs/promises";
 
 const CONFIG_PATH = "config/copilot-review-repos.json";
 const WORKFLOW_PATH = ".github/workflows/pr-build-zip.yml";
-const REUSABLE_WORKFLOW_REF = "wpeverest/.github/.github/workflows/pr-build-zip.yml";
+const REUSABLE_WORKFLOW_REF = "themegrill/.github/.github/workflows/pr-build-zip.yml";
 const BRANCH_NAME = "tg-autopilot/add-pr-build-zip";
 
 // Shared bucket for both orgs -- copied verbatim into every generated file,
@@ -361,7 +361,7 @@ async function processRepo(org, repo) {
   if (!putRes.ok) throw new Error(`Failed to write file on ${org}/${repo}: ${putRes.status} ${await putRes.text()}`);
 
   const prBody = [
-    "Adds a caller workflow for the reusable `pr-build-zip.yml` in wpeverest/.github.",
+    "Adds a caller workflow for the reusable `pr-build-zip.yml` in themegrill/.github.",
     "",
     "On every PR (opened/synced/reopened/ready-for-review) this builds an installable plugin/theme ZIP and posts a download link as a PR comment, so a real ZIP is one click away from the code diff.",
     "",
