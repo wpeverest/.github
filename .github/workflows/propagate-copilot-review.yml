@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: "0 6 * * 1" # weekly, Monday morning -- this only ever needs to catch newly-added config entries
   workflow_dispatch:
+    inputs:
+      repositories:
+        description: "Comma-separated organization/repository names to update"
+        required: false
+        default: "themegrill/colormag,themegrill/zakra"
 
 jobs:
   propagate:
@@ -26,4 +31,5 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           BOT_TOKEN_THEMEGRILL: ${{ secrets.BOT_TOKEN_THEMEGRILL }}
+          COPILOT_REVIEW_REPOS: ${{ inputs.repositories || 'themegrill/colormag,themegrill/zakra' }}
         run: node scripts/propagate-copilot-review.mjs

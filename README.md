@@ -9,7 +9,7 @@ Why a machine user instead of a GitHub App: it keeps one identity across both or
 | Feature | Files | Docs |
 |---|---|---|
 | **PR build-zip comment** — builds a plugin/theme zip on every ready-for-review PR, uploads it, and posts/updates one comment with a direct download link | `.github/workflows/pr-build-zip.yml` + `.caller.yml` | [SETUP.md](SETUP.md) |
-| **Copilot review on comment** — lets any team member trigger a Copilot code review on a PR by commenting a trigger phrase, without needing their own Copilot seat | `.github/workflows/copilot-review-on-comment.yml` + `.caller.yml` | inline comments in the workflow file |
+| **PR review automation** — requests Copilot as a reviewer when a PR opens, and lets team members trigger a Copilot code review by commenting a trigger phrase | `.github/workflows/copilot-review-on-comment.yml` + `.caller.yml` | inline comments in the workflow file |
 | **Crisp → AI → GitHub issue** — hourly pipeline that reads resolved (and some still-open) Crisp support conversations, classifies whether they describe a real bug/feature, and either files a GitHub issue, comments on an existing one, or leaves a note back in the Crisp conversation | `.github/workflows/crisp-triage.yml`, `scripts/`, `prompts/`, `config/`, `state/` | [PHASE2-SETUP.md](PHASE2-SETUP.md) |
 
 ## Onboarding a new repo
@@ -21,6 +21,8 @@ Why a machine user instead of a GitHub App: it keeps one identity across both or
 - `Propagate pr-build-zip secrets to all repos` — only needs re-running if the new repo needs `ARTIFACTS_KEY`/`ARTIFACTS_SECRET` and doesn't already have them (see the Free-plan gotcha below — this is required for the ZIP build to actually work, not just for the PR to open).
 
 Don't hand-copy `*.caller.yml` into a repo directly anymore — that was the original Phase 1 approach, superseded by the scripts above once more than a couple of repos needed onboarding. The scripts are idempotent: re-running them after adding one new repo name doesn't touch or duplicate anything on the repos already onboarded.
+
+The Copilot reviewer rollout is currently limited to `themegrill/colormag` and `themegrill/zakra` for testing. The propagation workflow’s `repositories` input controls the target list.
 
 **Crisp triage**: add the target repo (or product name, for the multi-product `THEMEGRILL` account) to `config/inbox-to-repo.json` — see [PHASE2-SETUP.md § 4](PHASE2-SETUP.md#4-populate-configinbox-to-repojson). No caller workflow needed here; this one runs centrally against every mapped repo.
 

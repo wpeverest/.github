@@ -23,6 +23,46 @@ on:
         required: true
 
 jobs:
+  assign-copilot:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      # Same poll-don't-just-retry approach as the "Request Copilot review"
+      # step in the request-review job below (see its comment for the full
+      # reasoning/evidence) -- a single check-then-request here would hit the
+      # identical false-failure risk: Copilot can take over a minute to
+      # actually land, so a one-shot attempt can look like a no-op while it's
+      # still quietly working.
+      - name: Request Copilot review
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          copilot_present() {
+            gh api "repos/$REPO/pulls/$PR/requested_reviewers" --jq '.users[].login' | grep -qx 'copilot-pull-request-reviewer\[bot\]' && return 0
+            gh api "repos/$REPO/pulls/$PR/reviews" --jq '.[].user.login' | grep -qx 'copilot-pull-request-reviewer\[bot\]' && return 0
+            return 1
+          }
+
+          gh pr edit "$PR" --repo "$REPO" --add-reviewer @copilot || true
+
+          for check in $(seq 1 18); do
+            if copilot_present; then
+              echo "Copilot review request confirmed after $((check * 10))s."
+              exit 0
+            fi
+            if [ "$check" -eq 6 ]; then
+              echo "Nothing after 60s, re-issuing the request..."
+              gh pr edit "$PR" --repo "$REPO" --add-reviewer @copilot || true
+            fi
+            sleep 10
+          done
+
+          echo "::warning::Copilot review request not confirmed after 3 minutes on $REPO#$PR. This is a known intermittent GitHub platform issue, not a config problem -- it may still complete later."
+
   request-review:
     # Only PR comments (issue_comment fires for both issues and PR conversation
     # comments; github.event.issue.pull_request only exists on the PR case).
