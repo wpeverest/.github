@@ -9,7 +9,7 @@ Why a machine user instead of a GitHub App: it keeps one identity across both or
 | Feature | Files | Docs |
 |---|---|---|
 | **PR build-zip comment** — builds a plugin/theme zip on every ready-for-review PR, uploads it, and posts/updates one comment with a direct download link | `.github/workflows/pr-build-zip.yml` + `.caller.yml` | [SETUP.md](SETUP.md) |
-| **Copilot review on comment** — lets any team member trigger a Copilot code review on a PR by commenting a trigger phrase, without needing their own Copilot seat | `.github/workflows/copilot-review-on-comment.yml` + `.caller.yml` | inline comments in the workflow file |
+| **PR review automation** — requests `tg-autopilot` as a reviewer when a PR opens, and lets team members trigger a Copilot code review by commenting a trigger phrase | `.github/workflows/copilot-review-on-comment.yml` + `.caller.yml` | inline comments in the workflow file |
 | **Crisp → AI → GitHub issue** — hourly pipeline that reads resolved (and some still-open) Crisp support conversations, classifies whether they describe a real bug/feature, and either files a GitHub issue, comments on an existing one, or leaves a note back in the Crisp conversation | `.github/workflows/crisp-triage.yml`, `scripts/`, `prompts/`, `config/`, `state/` | [PHASE2-SETUP.md](PHASE2-SETUP.md) |
 
 ## Onboarding a new repo

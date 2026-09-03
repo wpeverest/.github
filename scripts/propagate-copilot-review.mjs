@@ -40,6 +40,8 @@ const BRANCH_NAME = "tg-autopilot/add-copilot-review-on-comment";
 const CALLER_WORKFLOW_CONTENT = `name: Copilot review on comment
 
 on:
+  pull_request_target:
+    types: [opened]
   issue_comment:
     types: [created]
 
@@ -133,7 +135,7 @@ async function syncWorkflow(org, repo) {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      message: existingSha ? "Fix Copilot review on comment (secrets.BOT_TOKEN, not inherit)" : "Add Copilot review on comment",
+      message: existingSha ? "Update PR review automation" : "Add PR review automation",
       content: Buffer.from(CALLER_WORKFLOW_CONTENT).toString("base64"),
       branch: BRANCH_NAME,
       ...(existingSha ? { sha: existingSha } : {}),
@@ -145,10 +147,10 @@ async function syncWorkflow(org, repo) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      title: "Add Copilot review on comment",
+      title: "Add PR review automation",
       head: BRANCH_NAME,
       base: baseBranch,
-      body: "Adds the reusable Copilot-review-on-comment workflow, called from wpeverest/.github. Commenting `@tg-autopilot review` on a PR (from an account with write access or higher) requests a Copilot code review through tg-autopilot's seat.",
+      body: "Adds the reusable PR-review workflow, called from wpeverest/.github. It requests tg-autopilot as a reviewer when a PR opens, and lets accounts with write access or higher request a Copilot review by commenting `@tg-autopilot review`.",
     }),
   });
   // 422 here typically means a PR from this branch already exists -- the

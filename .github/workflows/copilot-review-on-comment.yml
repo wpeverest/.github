@@ -23,6 +23,26 @@ on:
         required: true
 
 jobs:
+  assign-tg-autopilot:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request tg-autopilot review
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          reviewer_present() {
+            gh api "repos/$REPO/pulls/$PR/requested_reviewers" --jq '.users[].login' | grep -qx 'tg-autopilot' && return 0
+            gh api "repos/$REPO/pulls/$PR/reviews" --jq '.[].user.login' | grep -qx 'tg-autopilot' && return 0
+            return 1
+          }
+
+          reviewer_present || gh pr edit "$PR" --repo "$REPO" --add-reviewer tg-autopilot
+
   request-review:
     # Only PR comments (issue_comment fires for both issues and PR conversation
     # comments; github.event.issue.pull_request only exists on the PR case).
