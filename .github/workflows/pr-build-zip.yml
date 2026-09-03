@@ -170,15 +170,23 @@ jobs:
       # tooling (phpunit, test helpers, ...) -- matches what every repo's own
       # manual release automation already does (grunt's release task runs
       # `composer install --no-dev` internally, see composer-install's own
-      # comment above). Also fixes a real, confirmed failure: everest-forms'
-      # composer.lock has dev-only packages (spatie/phpunit-watcher, etc.)
-      # locked to versions requiring PHP ^7.0, directly contradicting its own
-      # production dependencies needing 8.2+ -- no single PHP version could
-      # ever satisfy both, but the dev-only ones were never going to be
-      # needed in the built ZIP anyway.
+      # comment above).
+      #
+      # --ignore-platform-reqs: --no-dev alone was NOT enough to fix
+      # everest-forms (confirmed for real) -- composer validates the WHOLE
+      # lock file's platform (PHP version) requirements up front, including
+      # require-dev packages, before deciding what to actually install. Its
+      # dev-only packages (spatie/phpunit-watcher, etc.) were locked to
+      # versions requiring PHP ^7.0, directly contradicting the production
+      # dependencies needing 8.2+ -- no single php-version input could ever
+      # satisfy both, and --no-dev doesn't skip validating the packages it's
+      # about to exclude. --ignore-platform-reqs skips that validation
+      # entirely; safe here specifically because --no-dev already means
+      # those conflicting packages are never actually installed, so nothing
+      # genuinely incompatible ends up in the built ZIP.
       - name: Install Composer dependencies
         if: inputs.composer-install
-        run: composer install --prefer-dist --no-interaction --no-progress --no-dev
+        run: composer install --prefer-dist --no-interaction --no-progress --no-dev --ignore-platform-reqs
 
       - name: Install JS dependencies
         # eval, not a bare interpolation: when install-command is unset this
