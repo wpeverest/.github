@@ -25,18 +25,42 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // conversation volume across both accounts reached ~800 -- a fixed,
 // deterministic failure every run until the burst above the limit is worn
 // down by backoff, not just a one-off flake.
+//
+// Also retries on 401 "invalid_session" specifically -- confirmed for real,
+// repeatedly, on THEMEGRILL's resolved-conversation fetch: the exact same
+// request (same credentials, same URL, same params) reliably succeeds when
+// issued standalone moments later, but fails inside the real multi-page
+// crisp-triage run. Not reproducible via any parameter or timing pattern we
+// could isolate (page number, request rate, concurrent runs) -- this reads
+// as a genuine intermittent quirk on Crisp's own side, not a bug in how we
+// build the request. Ruled out: bad credentials (retrying with identical
+// creds succeeds), stale/malformed cursor value (verified byte-for-byte
+// clean), request rate limiting (Crisp's own dashboard showed ample quota
+// remaining). A different failure reason (a genuinely invalid token) would
+// keep failing on retry too, so retrying here is safe either way -- it
+// either recovers a real flake or burns a few retries before surfacing the
+// same error, never masks a permanent problem silently.
 async function crispFetch(path, options, method) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${CRISP_BASE}${path}`, options);
-    if (res.status !== 429) {
-      if (!res.ok) throw new Error(`Crisp ${method} ${path} failed: ${res.status} ${await res.text()}`);
-      return res.json();
+    if (res.status === 429) {
+      if (attempt >= MAX_RETRIES) {
+        throw new Error(`Crisp ${method} ${path} failed: 429 ${await res.text()} (gave up after ${MAX_RETRIES} retries)`);
+      }
+      const retryAfter = Number(res.headers.get("retry-after"));
+      await sleep(retryAfter > 0 ? retryAfter * 1000 : BASE_RETRY_DELAY_MS * 2 ** attempt);
+      continue;
     }
-    if (attempt >= MAX_RETRIES) {
-      throw new Error(`Crisp ${method} ${path} failed: 429 ${await res.text()} (gave up after ${MAX_RETRIES} retries)`);
+    if (res.status === 401) {
+      const bodyText = await res.text();
+      if (bodyText.includes("invalid_session") && attempt < MAX_RETRIES) {
+        await sleep(BASE_RETRY_DELAY_MS * 2 ** attempt);
+        continue;
+      }
+      throw new Error(`Crisp ${method} ${path} failed: 401 ${bodyText}${attempt >= MAX_RETRIES ? ` (gave up after ${MAX_RETRIES} retries)` : ""}`);
     }
-    const retryAfter = Number(res.headers.get("retry-after"));
-    await sleep(retryAfter > 0 ? retryAfter * 1000 : BASE_RETRY_DELAY_MS * 2 ** attempt);
+    if (!res.ok) throw new Error(`Crisp ${method} ${path} failed: ${res.status} ${await res.text()}`);
+    return res.json();
   }
 }
 
