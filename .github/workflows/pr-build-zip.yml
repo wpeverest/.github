@@ -189,13 +189,19 @@ jobs:
         run: composer install --prefer-dist --no-interaction --no-progress --no-dev --ignore-platform-reqs
 
       - name: Install JS dependencies
-        # eval, not a bare interpolation: when install-command is unset this
-        # renders as `eval ""`, a real no-op statement -- interpolating it
-        # directly would render as a blank line, an empty if-body, which bash
-        # treats as a syntax error ("unexpected token `elif'").
+        # install-command comes in via an env var, not direct ${{ }}
+        # interpolation into the script -- GitHub Actions substitutes ${{ }}
+        # textually with no shell-escaping, so a value containing a `"`
+        # breaks the `if [ -n "..." ]` test outright (confirmed for real: a
+        # quoted echo message here produced "syntax error: '--' unexpected"
+        # and silently fell through to the wrong branch instead of failing
+        # loudly). An env var's value is passed as real process data, so it
+        # can't corrupt the script text no matter what characters it contains.
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
         run: |
-          if [ -n "${{ inputs.install-command }}" ]; then
-            eval "${{ inputs.install-command }}"
+          if [ -n "$INSTALL_COMMAND" ]; then
+            eval "$INSTALL_COMMAND"
           elif [ "${{ inputs.package-manager }}" = "npm" ]; then
             npm ci
           elif [ "${{ inputs.package-manager }}" = "pnpm" ]; then
