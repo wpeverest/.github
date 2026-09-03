@@ -150,7 +150,7 @@ async function syncWorkflow(org, repo) {
       title: "Add PR review automation",
       head: BRANCH_NAME,
       base: baseBranch,
-      body: "Adds the reusable PR-review workflow, called from wpeverest/.github. It requests tg-autopilot as a reviewer when a PR opens, and lets accounts with write access or higher request a Copilot review by commenting `@tg-autopilot review`.",
+      body: "Adds the reusable PR-review workflow, called from wpeverest/.github. It requests Copilot as a reviewer when a PR opens, and lets accounts with write access or higher request a Copilot review by commenting `@tg-autopilot review`.",
     }),
   });
   // 422 here typically means a PR from this branch already exists -- the
