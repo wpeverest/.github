@@ -61,19 +61,33 @@ async function getFile(org, repo, path) {
 // Node version ranges we know how to translate into a concrete
 // actions/setup-node version string. Anything unrecognized falls through to
 // the '20.x' default rather than guessing at a range we can't parse safely.
+// `engines.node`/composer's `require.php` commonly declare an ancient
+// minimum-support floor (">=0.8.0", ">=5.6.20") left over from years-old
+// boilerplate -- that is NOT the version anyone actually wants to build
+// with, and taking it literally breaks the build outright (confirmed for
+// real: estore's ">=0.8.0" produced literal Node 0.x, which doesn't even
+// have a working npm; user-registration-pro's ">=5.6.20" produced PHP 5.6,
+// too old for its own composer dependencies). Both functions below only
+// trust the declared number when it's at or above a sane modern floor --
+// otherwise these fields are pure noise and the tool's own sensible
+// default is more likely correct than anything parsed from them.
 function nodeVersionFromEngines(engines) {
   const raw = engines?.node;
-  if (!raw) return "20.x";
+  const DEFAULT = "20.x";
+  if (!raw) return DEFAULT;
   const match = raw.match(/(\d+)/);
-  if (!match) return "20.x";
-  return `${match[1]}.x`;
+  if (!match) return DEFAULT;
+  const major = Number(match[1]);
+  return major >= 16 ? `${major}.x` : DEFAULT;
 }
 
 function phpVersionFromComposer(composerJson) {
   const raw = composerJson?.require?.php;
-  if (!raw) return "7.4";
+  const DEFAULT = "7.4";
+  if (!raw) return DEFAULT;
   const match = raw.match(/(\d+\.\d+)/);
-  return match ? match[1] : "7.4";
+  if (!match) return DEFAULT;
+  return Number(match[1]) >= 7.4 ? match[1] : DEFAULT;
 }
 
 // packageManager field, e.g. "pnpm@8.6.0" or "yarn@1.22.19" -> "pnpm"/"yarn".
@@ -105,12 +119,26 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
   // reach the yarn default when NOTHING else indicates a choice, per the
   // task spec -- not used as a tie-breaker ahead of real evidence.
   let packageManager = packageManagerFromField(packageJson?.packageManager);
+  // Whether pnpm/action-setup can auto-detect a version via corepack's
+  // "packageManager" field -- if not, and we're using pnpm, the reusable
+  // workflow needs an explicit pnpm-version or the setup step fails
+  // outright with "No pnpm version is specified" (confirmed for real on
+  // themegrill/colormag, which has no packageManager field). Only tracked
+  // for pnpm specifically -- npm/yarn don't need action-setup at all.
+  const hasPackageManagerField = Boolean(packageManager);
   if (!packageManager) {
     if (lockfiles.pnpm) packageManager = "pnpm";
     else if (lockfiles.yarn) packageManager = "yarn";
     else if (lockfiles.npm) packageManager = "npm";
     else packageManager = "yarn";
   }
+  // A safe, currently-supported pnpm major version -- only used as a
+  // fallback when the repo gives us nothing to auto-detect from. Never
+  // overrides a repo's own declared version, which corepack already
+  // handles fine (confirmed on user-registration/user-registration-pro,
+  // both of which declare "packageManager": "pnpm@..." and work today
+  // with no explicit pnpm-version passed).
+  const pnpmVersion = packageManager === "pnpm" && !hasPackageManagerField ? "9" : null;
 
   // --- node / php versions ------------------------------------------------
   const nodeVersion = nodeVersionFromEngines(packageJson?.engines);
@@ -188,7 +216,7 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
     zipGlob = "dist/*.zip";
   }
 
-  return { packageManager, nodeVersion, phpVersion, buildCommand, composerInstall, zipGlob };
+  return { packageManager, nodeVersion, phpVersion, buildCommand, composerInstall, zipGlob, pnpmVersion };
 }
 
 function renderSecretsBlock(org) {
@@ -205,7 +233,8 @@ function renderSecretsBlock(org) {
 }
 
 function renderWorkflow({ defaultBranch, org, config }) {
-  const { packageManager, nodeVersion, phpVersion, buildCommand, composerInstall, zipGlob } = config;
+  const { packageManager, nodeVersion, phpVersion, buildCommand, composerInstall, zipGlob, pnpmVersion } = config;
+  const pnpmVersionLine = pnpmVersion ? `      pnpm-version: '${pnpmVersion}'\n` : "";
   return `name: Build Testable ZIP
 
 on:
@@ -221,7 +250,7 @@ jobs:
       node-version: '${nodeVersion}'
       php-version: '${phpVersion}'
       package-manager: ${packageManager}
-      composer-install: ${composerInstall}
+${pnpmVersionLine}      composer-install: ${composerInstall}
       build-command: ${buildCommand}
       zip-glob: '${zipGlob}'
       artifacts-bucket: ${ARTIFACTS_BUCKET}
