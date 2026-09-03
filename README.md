@@ -22,6 +22,8 @@ Why a machine user instead of a GitHub App: it keeps one identity across both or
 
 Don't hand-copy `*.caller.yml` into a repo directly anymore — that was the original Phase 1 approach, superseded by the scripts above once more than a couple of repos needed onboarding. The scripts are idempotent: re-running them after adding one new repo name doesn't touch or duplicate anything on the repos already onboarded.
 
+The Copilot reviewer rollout is currently limited to `themegrill/colormag` and `themegrill/zakra` for testing. The propagation workflow’s `repositories` input controls the target list.
+
 **Crisp triage**: add the target repo (or product name, for the multi-product `THEMEGRILL` account) to `config/inbox-to-repo.json` — see [PHASE2-SETUP.md § 4](PHASE2-SETUP.md#4-populate-configinbox-to-repojson). No caller workflow needed here; this one runs centrally against every mapped repo.
 
 ## Cross-org reach

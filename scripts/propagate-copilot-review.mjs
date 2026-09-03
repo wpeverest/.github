@@ -167,12 +167,17 @@ async function syncWorkflow(org, repo) {
 
 async function main() {
   const config = JSON.parse(await readFile("config/copilot-review-repos.json", "utf8"));
+  const requestedRepos = process.env.COPILOT_REVIEW_REPOS
+    ?.split(",")
+    .map((repo) => repo.trim())
+    .filter(Boolean);
   let added = 0;
   let skipped = 0;
   let failed = 0;
 
   for (const [org, repos] of Object.entries(config)) {
     for (const repo of repos) {
+      if (requestedRepos && !requestedRepos.includes(`${org}/${repo}`)) continue;
       try {
         await setRepoSecret(org, repo);
         const existing = await getExistingContent(org, repo);
