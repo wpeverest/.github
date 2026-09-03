@@ -1,7 +1,7 @@
 # Reusable workflow: build a testable plugin/theme ZIP for a PR, upload it to
 # object storage, and keep ONE PR comment updated with a direct download link.
 #
-# Lives in wpeverest/.github. Consuming repos call it with a short caller
+# Lives in themegrill/.github. Consuming repos call it with a short caller
 # workflow -- see pr-build-zip.caller.yml for a template.
 name: PR Build ZIP
 

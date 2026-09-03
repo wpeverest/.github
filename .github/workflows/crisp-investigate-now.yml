@@ -33,7 +33,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.BOT_TOKEN }} # needs contents:write to commit updated state
+          # BOT_TOKEN_THEMEGRILL, not BOT_TOKEN: this repo now lives in themegrill.
+          token: ${{ secrets.BOT_TOKEN_THEMEGRILL }} # needs contents:write to commit updated state
 
       - uses: actions/setup-node@v4
         with:

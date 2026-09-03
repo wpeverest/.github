@@ -3,7 +3,7 @@
 #
 # `secrets: inherit` looks like it should work here but doesn't for a
 # themegrill repo -- it only inherits secrets when the caller and the
-# reusable workflow are in the SAME organization. wpeverest/.github lives in
+# reusable workflow are in the SAME organization. themegrill/.github lives in
 # wpeverest, so a themegrill caller needs the secret passed explicitly by
 # name instead, which works across the org boundary. Confirmed for real:
 # every themegrill repo failed identically ("Secret BOT_TOKEN is required,
@@ -18,6 +18,6 @@ on:
 
 jobs:
   review:
-    uses: wpeverest/.github/.github/workflows/copilot-review-on-comment.yml@master
+    uses: themegrill/.github/.github/workflows/copilot-review-on-comment.yml@master
     secrets:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}

@@ -28,7 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.BOT_TOKEN }} # needs contents:write here to commit the advanced cursor
+          # BOT_TOKEN_THEMEGRILL, not BOT_TOKEN: this repo now lives in
+          # themegrill (transferred from wpeverest), so only the
+          # themegrill-scoped token can write to it. BOT_TOKEN is still
+          # used elsewhere in this file for reaching wpeverest product repos.
+          token: ${{ secrets.BOT_TOKEN_THEMEGRILL }} # needs contents:write here to commit the advanced cursor
 
       - uses: actions/setup-node@v4
         with:

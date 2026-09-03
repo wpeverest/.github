@@ -23,7 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.BOT_TOKEN }} # needs contents:write to commit the seeded state back
+          # BOT_TOKEN_THEMEGRILL, not BOT_TOKEN: this repo now lives in themegrill.
+          token: ${{ secrets.BOT_TOKEN_THEMEGRILL }} # needs contents:write to commit the seeded state back
 
       - uses: actions/setup-node@v4
         with:
