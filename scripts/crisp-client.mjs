@@ -19,27 +19,12 @@ const MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 1000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Retries on 429 with exponential backoff (honoring Retry-After if Crisp
-// sends one). Confirmed for real: crisp-dedupe-active.mjs's per-conversation
-// loop has no throttling and hit Crisp's per-route rate limit once active
-// conversation volume across both accounts reached ~800 -- a fixed,
-// deterministic failure every run until the burst above the limit is worn
-// down by backoff, not just a one-off flake.
+// Retries on 429 (honoring Retry-After) -- hit for real once per-run request
+// volume across accounts reached ~800.
 //
-// Also retries on 401 "invalid_session" specifically -- confirmed for real,
-// repeatedly, on THEMEGRILL's resolved-conversation fetch: the exact same
-// request (same credentials, same URL, same params) reliably succeeds when
-// issued standalone moments later, but fails inside the real multi-page
-// crisp-triage run. Not reproducible via any parameter or timing pattern we
-// could isolate (page number, request rate, concurrent runs) -- this reads
-// as a genuine intermittent quirk on Crisp's own side, not a bug in how we
-// build the request. Ruled out: bad credentials (retrying with identical
-// creds succeeds), stale/malformed cursor value (verified byte-for-byte
-// clean), request rate limiting (Crisp's own dashboard showed ample quota
-// remaining). A different failure reason (a genuinely invalid token) would
-// keep failing on retry too, so retrying here is safe either way -- it
-// either recovers a real flake or burns a few retries before surfacing the
-// same error, never masks a permanent problem silently.
+// Also retries on 401 "invalid_session" -- seen intermittently on requests
+// that succeed when retried, with no other cause identified. Safe either
+// way: a genuinely invalid token just fails again after the retries.
 async function crispFetch(path, options, method) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${CRISP_BASE}${path}`, options);
