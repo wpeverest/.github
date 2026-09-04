@@ -12,6 +12,19 @@ Why a machine user instead of a GitHub App: it keeps one identity across both or
 | **PR review automation** — requests Copilot as a reviewer when a PR opens, and lets team members trigger a Copilot code review by commenting a trigger phrase | `.github/workflows/copilot-review-on-comment.yml` + `.caller.yml` | inline comments in the workflow file |
 | **Crisp → AI → GitHub issue** — hourly pipeline that reads resolved (and some still-open) Crisp support conversations, classifies whether they describe a real bug/feature, and either files a GitHub issue, comments on an existing one, or leaves a note back in the Crisp conversation | `.github/workflows/crisp-triage.yml`, `scripts/`, `prompts/`, `config/`, `state/` | [PHASE2-SETUP.md](PHASE2-SETUP.md) |
 
+## Maintainer skills
+
+`.claude/skills/` has step-by-step Claude Code skills for the recurring maintenance tasks below — each one bakes in the gotchas this README also documents inline, as an actionable checklist:
+
+- `onboard-pr-build-zip-repo` — add a repo to the build-zip pipeline, plus the build-failure checklist (version floors, missing wp-cli, no discoverable zip output, composer/npm conflicts).
+- `onboard-copilot-review-repo` — add a repo to the Copilot auto-review pipeline.
+- `onboard-crisp-account` — onboard a *new Crisp workspace* (a new product with its own separate Crisp login) into crisp-triage. Different from onboarding a repo — see the skill for why.
+- `propagate-shared-secret` — add a brand-new secret/variable that needs to reach every private repo in both orgs, working around the GitHub Free org-secret limitation.
+- `transfer-repo-across-orgs` — move a repo between `wpeverest` and `themegrill` without breaking automation across it.
+- `debug-crisp-401-errors` — systematic elimination checklist for a Crisp API auth error.
+- `write-safe-bot-workflow` — avoid the bot-identity and self-trigger-loop traps when writing any comment-triggered workflow.
+- `verify-github-actions-change` — why an immediate re-check after a mutation can look stale, and how to actually confirm it took effect.
+
 ## Onboarding a new repo
 
 **Build-zip / Copilot review**: add the repo's name to the right org's array in `config/copilot-review-repos.json`, then re-run the matching propagate workflow (`workflow_dispatch`, this repo's Actions tab):
