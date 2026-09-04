@@ -44,13 +44,33 @@ async function resolveRepo(accountConfig, transcript, conversation) {
   return (inboxKey && accountConfig.inboxes?.[inboxKey]?.repo) || null;
 }
 
+// Title alone is not enough context to match on -- two issues can share a
+// surface phrase ("charged twice") while describing entirely different
+// problems (a one-off billing complaint about buying a license on
+// wpeverest.com vs. a product code defect in the plugin's own payment
+// gateway on a customer's site). A short body excerpt lets the model
+// actually compare what happened, not just how it was titled.
+function issueSummary(issue) {
+  const excerpt = (issue.body ?? "").slice(0, 500).replace(/\n+/g, " ").trim();
+  return `#${issue.number}: ${issue.title}\n${excerpt}`;
+}
+
 async function findMatchingIssue(transcript, issues) {
   if (issues.length === 0) return null;
-  const list = issues.map((i) => `#${i.number}: ${i.title}`).join("\n");
+  const list = issues.map(issueSummary).join("\n\n");
   const { matchedNumber } = await chatJSON(
     "You check whether a customer support transcript describes the SAME " +
-      "underlying problem as one of these already-tracked GitHub issues:\n\n" +
-      `${list}\n\nRespond with ONLY a JSON object: {"matchedNumber": <issue number>} ` +
+      "underlying problem as one of these already-tracked GitHub issues " +
+      "(title + a short excerpt of each):\n\n" +
+      `${list}\n\nA match requires the same actual problem, not just similar ` +
+      "wording -- e.g. a customer asking for a refund because their OWN " +
+      "purchase/license was billed twice on wpeverest.com is NOT the same " +
+      "issue as a product defect where the plugin's payment code double-" +
+      "charges END USERS on a customer's own site, even though both could " +
+      'be described as "charged twice." Likewise, a general question about ' +
+      "how a feature/setting works, or a request for a feature that doesn't " +
+      "exist yet, is never a match for a tracked bug. " +
+      'Respond with ONLY a JSON object: {"matchedNumber": <issue number>} ' +
       'if there is a genuine match, or {"matchedNumber": null} if none clearly match or ' +
       "you're unsure. Be conservative -- a wrong match creates noise on someone " +
       "else's issue, so only match when the described problem is really the same.",
