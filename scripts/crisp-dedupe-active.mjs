@@ -44,12 +44,9 @@ async function resolveRepo(accountConfig, transcript, conversation) {
   return (inboxKey && accountConfig.inboxes?.[inboxKey]?.repo) || null;
 }
 
-// Title alone is not enough context to match on -- two issues can share a
-// surface phrase ("charged twice") while describing entirely different
-// problems (a one-off billing complaint about buying a license on
-// wpeverest.com vs. a product code defect in the plugin's own payment
-// gateway on a customer's site). A short body excerpt lets the model
-// actually compare what happened, not just how it was titled.
+// Title alone isn't enough context -- two issues can share a surface
+// phrase ("charged twice") while describing unrelated problems. A short
+// body excerpt lets the model compare what actually happened.
 function issueSummary(issue) {
   const excerpt = (issue.body ?? "").slice(0, 500).replace(/\n+/g, " ").trim();
   return `#${issue.number}: ${issue.title}\n${excerpt}`;
