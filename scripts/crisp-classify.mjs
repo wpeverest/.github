@@ -1,30 +1,21 @@
 #!/usr/bin/env node
-// Stage 1 of the Crisp -> AI -> GitHub issue pipeline.
+// Stage 1 of the Crisp -> AI -> GitHub issue pipeline: fetches conversations
+// resolved since the last run, maps each to a repo, and classifies each with
+// one cheap, tool-less model call. Most conversations aren't actionable and
+// stop here.
 //
-// Fetches conversations resolved since the last run, maps each to a repo,
-// and classifies each with one cheap, tool-less model call -- most support
-// conversations aren't actionable and stop here.
+// Also escalates a still-open conversation to full investigation without
+// waiting for it to resolve -- see PHASE2-SETUP.md § 4c for the full policy
+// (manual "!tg-autopilot investigate" note, or auto-escalation after
+// AUTO_ESCALATE_HOURS with an upper bound so an old backlog isn't blindly
+// swept in).
 //
-// Also escalates a still-open conversation straight to full investigation,
-// without waiting for it to resolve, in two cases:
-//   - a private note asks for it explicitly: "!tg-autopilot investigate"
-//     (found via Crisp's own text search, not the active-conversation page
-//     cap below -- a manual trigger should never depend on how many other
-//     conversations were touched more recently)
-//   - it's been open AUTO_ESCALATE_HOURS-AUTO_ESCALATE_MAX_HOURS and the
-//     classifier agrees it looks real -- fires at most once automatically;
-//     a fresh manual note can always re-trigger, the time-based rule can't.
-//     The upper bound exists because this account has a genuine backlog of
-//     conversations abandoned for 100+ days -- auto-escalating something
-//     that stale blind is a bad default (confirmed for real once). Past the
-//     ceiling, only a manual note escalates it.
+// Writes matrix.json (Stage 2's input), state/cursor.json, and
+// state/escalated.json (per-session bookkeeping so neither escalation path
+// repeats itself).
 //
-// Writes matrix.json (actionable conversations for Stage 2), state/cursor
-// .json (advanced to this run's start time), and state/escalated.json
-// (per-session auto-escalation/manual-note bookkeeping so neither repeats).
-//
-// Provider: OpenAI, swappable freely. CLASSIFY_MODEL is required, not
-// defaulted -- verify the model id against your account before relying on it.
+// Provider: OpenAI, swappable freely. Verify CLASSIFY_MODEL against your
+// account before relying on it.
 import { readFile, writeFile } from "node:fs/promises";
 import {
   fetchResolvedConversationsSince,
@@ -38,23 +29,22 @@ import { classifyAndRoute } from "./crisp-classifier.mjs";
 
 const { GITHUB_STEP_SUMMARY } = process.env;
 const AUTO_ESCALATE_HOURS = 12;
-const AUTO_ESCALATE_MAX_HOURS = 24 * 30; // 30 days -- past this, only a manual note escalates it
+const AUTO_ESCALATE_MAX_HOURS = 24 * 30; // past this, only a manual note escalates it
 
 async function main() {
   const runStartedAt = new Date().toISOString();
   const cursor = JSON.parse(await readFile("state/cursor.json", "utf8"));
   const accounts = JSON.parse(await readFile("config/inbox-to-repo.json", "utf8")).accounts;
   // Skip anything the active-conversation dedupe check already matched to a
-  // tracked issue -- otherwise this produces a second, redundant comment.
+  // tracked issue, to avoid a second redundant comment.
   const activeNotified = new Set(
     JSON.parse(await readFile("state/active-notified.json", "utf8").catch(() => "[]"))
   );
   // { [session_id]: { autoEscalated: bool, manualNoteCount: number } }
   const escalated = JSON.parse(await readFile("state/escalated.json", "utf8").catch(() => "{}"));
-  // session_ids already fully investigated once (any path). Prevents a
-  // resolve -> reopen -> resolve cycle from reinvestigating (and re-noting)
-  // the same conversation every time -- confirmed for real, 6x in 3 days.
-  // Not checked on the manual-note path; that's an intentional re-trigger.
+  // session_ids already fully investigated once (any path) -- prevents a
+  // resolve/reopen/resolve cycle from reinvestigating forever. Not checked
+  // on the manual-note path; that's an intentional re-trigger.
   const investigated = new Set(
     JSON.parse(await readFile("state/investigated.json", "utf8").catch(() => "[]"))
   );
@@ -67,9 +57,8 @@ async function main() {
   let manualEscalations = 0;
   let autoEscalations = 0;
 
-  // Each Crisp account (different logins) is fetched and classified
-  // independently; one not yet credentialed is skipped with a warning
-  // rather than crashing the whole run.
+  // Each Crisp account (different logins) is fetched/classified independently;
+  // one not yet credentialed is skipped with a warning, not a crash.
   for (const [accountKey, accountConfig] of Object.entries(accounts)) {
     let creds;
     try {
@@ -99,14 +88,10 @@ async function main() {
         .join("\n");
       if (!transcript.trim()) continue;
 
-      // A manual "!tg-autopilot investigate" note always overrides the cheap
-      // classifier and the investigated guard, same as the active-conversation
-      // manual path below -- needed here too, since a conversation reaching
-      // this loop has already resolved and so would otherwise never be
-      // checked for the note at all (confirmed for real: a note added while
-      // still open was invisible here once the conversation resolved before
-      // this loop next ran, silently falling back to the cheap classifier's
-      // own verdict instead of the human's explicit request).
+      // A manual note always overrides the cheap classifier and the
+      // investigated guard. Needed here too (not just in the active loop
+      // below) since a conversation that resolved before its note was ever
+      // checked would otherwise silently skip the human's explicit request.
       const record = escalated[conversation.session_id] ?? { autoEscalated: false, manualNoteCount: 0 };
       const manualNoteCount = countManualTriggerNotes(messages);
       const hasNewManualNote = manualNoteCount > record.manualNoteCount;
@@ -149,10 +134,9 @@ async function main() {
     // Independent of crisp-dedupe-active.mjs, which skips anything that
     // ends up in matrix.json this run.
     //
-    // Only fetch messages for a manual-note check on conversations touched
-    // since cursor.last_checked (adding a note is itself an update) -- an
-    // exact test, cheaper than fetching every active conversation's history.
-    // The staleness check needs no message fetch at all.
+    // Only fetch messages for conversations touched since cursor.last_checked
+    // (adding a note is itself an update) -- cheaper than fetching every
+    // active conversation's history. Staleness needs no message fetch at all.
     const lastCheckedMs = new Date(cursor.last_checked).getTime();
     const activeConversations = await fetchActiveConversations(creds);
     activeConversations.forEach((conversation) => {
@@ -161,11 +145,9 @@ async function main() {
     });
 
     // fetchActiveConversations' page cap can bury a manually-noted
-    // conversation on a high-volume account (confirmed for real on
-    // THEMEGRILL) -- search directly for the trigger phrase so a manual note
-    // is never missed regardless of the cap or how many other conversations
-    // were touched more recently. Anything found only here (not already in
-    // activeConversations) is appended and always checked this run.
+    // conversation on a high-volume account -- search directly for the
+    // trigger phrase so a manual note is never missed. Anything found only
+    // here is appended and always checked this run.
     const seenSessionIds = new Set(activeConversations.map((c) => c.session_id));
     const manualTriggerHits = await searchConversationsForManualTrigger(creds, "!tg-autopilot investigate");
     for (const hit of manualTriggerHits) {
@@ -178,9 +160,8 @@ async function main() {
     for (const conversation of activeConversations) {
       const record = escalated[conversation.session_id] ?? { autoEscalated: false, manualNoteCount: 0 };
 
-      // active.last, not created_at: a thread reopened weeks later by a
-      // returning customer should get a fresh grace period, not read as
-      // "50 days old." Pure conversation metadata -- no message fetch.
+      // active.last, not created_at: a reopened thread gets a fresh grace
+      // period rather than reading as ancient. Pure metadata, no message fetch.
       const lastActiveAt = conversation.active?.last ?? conversation.created_at;
       const staleHours = (Date.now() - lastActiveAt) / (1000 * 60 * 60);
       const eligibleForAutoEscalate =
@@ -230,10 +211,8 @@ async function main() {
     }
   }
 
-  // The resolved-conversations loop and the active-escalation loop can both
-  // claim the same session_id in one run (confirmed for real: a manual note
-  // reopens a just-resolved conversation, so both loops pick it up). Dedupe
-  // once here, keeping the first entry seen per session_id.
+  // Both loops can claim the same session_id in one run (e.g. a manual note
+  // reopens a just-resolved conversation). Dedupe, keeping the first entry seen.
   const seenSessionIds = new Set();
   const dedupedMatrix = matrix.filter((entry) => {
     if (seenSessionIds.has(entry.session_id)) return false;

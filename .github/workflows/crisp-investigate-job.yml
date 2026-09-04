@@ -19,12 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # Capped, not unlimited: every job shares one org-wide OpenAI TPM budget
-      # (500k/min for gpt-5-mini), so a large matrix firing all at once burns
-      # through it fast. Confirmed for real -- a run with ~10 concurrent jobs
-      # already hit 429s repeatedly, and some jobs never recovered (see the
-      # "Investigate and act" step's own retry-detection below). Capping
-      # concurrency doesn't eliminate rate limiting, just makes it rarer.
+      # Capped: every job shares one org-wide OpenAI TPM budget, and a large
+      # matrix firing at once reliably hits 429s. This just makes it rarer --
+      # see the "Investigate and act" step's own completion check below.
       max-parallel: 4
       matrix:
         include: ${{ fromJson(inputs.matrix) }}
@@ -34,9 +31,7 @@ jobs:
         with:
           path: .bot-tools
 
-      # tg-autopilot's fine-grained PAT is scoped to ONE resource owner --
-      # BOT_TOKEN covers wpeverest, BOT_TOKEN_THEMEGRILL covers themegrill.
-      # Pick whichever matches this conversation's target repo's org.
+      # Each PAT is scoped to one org -- pick the token matching this repo's org.
       - name: Check out target repo
         uses: actions/checkout@v4
         with:
@@ -51,14 +46,9 @@ jobs:
       - name: Install OpenCode CLI
         run: npm install -g opencode-ai
 
-      # $HOME, not /tg-autopilot: the runner user can't write to filesystem
-      # root ("mkdir: cannot create directory '/tg-autopilot': Permission
-      # denied"). $HOME is always writable and still outside the repo tree.
-      # crisp-post-note.mjs does `import { postNote } from "./crisp-client.mjs"`
-      # -- a relative import that needs crisp-client.mjs sitting right next
-      # to it here too, not just in its original scripts/ folder. Missing
-      # this broke the note-back step for real (ERR_MODULE_NOT_FOUND),
-      # though the agent noticed and reported it rather than failing silently.
+      # $HOME (writable, outside the repo tree) rather than filesystem root.
+      # crisp-post-note.mjs's relative import needs crisp-client.mjs sitting
+      # next to it here, not just in its original scripts/ folder.
       - name: Place Crisp note-posting helper (kept outside the repo tree, no name collision)
         run: |
           mkdir -p "$HOME/tg-autopilot"
@@ -68,10 +58,8 @@ jobs:
       - name: Re-fetch this conversation's transcript
         id: transcript
         env:
-          # Dynamic lookup by matrix.account (e.g. "USER_REGISTRATION") --
-          # each conversation's matrix entry says which Crisp account it came
-          # from, so we resolve that account's specific credentials here
-          # rather than assuming a single global Crisp account.
+          # Dynamic lookup by matrix.account -- resolves whichever Crisp
+          # account this conversation actually came from.
           CRISP_IDENTIFIER: ${{ secrets[format('CRISP_{0}_IDENTIFIER', matrix.account)] }}
           CRISP_KEY: ${{ secrets[format('CRISP_{0}_KEY', matrix.account)] }}
           CRISP_WEBSITE_ID: ${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}
@@ -82,9 +70,8 @@ jobs:
       - name: Build the agent prompt
         id: prompt
         env:
-          # Confirmed working (see conversationUrl() in scripts/crisp-client.mjs,
-          # which this duplicates since it's simple string interpolation that
-          # doesn't need the shared module loaded into a YAML step).
+          # Duplicates conversationUrl() in crisp-client.mjs -- simple enough
+          # not to need the shared module loaded into a YAML step.
           CONVERSATION_URL: https://app.crisp.chat/website/${{ vars[format('CRISP_{0}_WEBSITE_ID', matrix.account)] }}/inbox/${{ matrix.session_id }}/
         run: |
           node .bot-tools/scripts/build-prompt.mjs \
@@ -93,10 +80,8 @@ jobs:
             > prompt.md
           echo "path=$PWD/prompt.md" >> "$GITHUB_OUTPUT"
 
-      # OpenCode's env-var auto-detection is only confirmed (in their docs)
-      # for Anthropic. For OpenAI, write an explicit provider config using the
-      # same `{env:VAR}` substitution syntax that IS documented, rather than
-      # assume auto-detection also covers it.
+      # OpenCode's env-var auto-detection is only documented for Anthropic --
+      # write an explicit provider config for OpenAI instead.
       - name: Configure OpenCode's OpenAI provider
         working-directory: workspace
         run: |
@@ -110,15 +95,11 @@ jobs:
           }
           JSON
 
-      # opencode's CLI can exit 0 even when it never finished the task -- seen
-      # for real: a mid-investigation OpenAI rate-limit (429) error with no
-      # further retry, no issue filed, no Crisp note posted, yet the step
-      # still reported success. The prompt's own rule 5 ("always leave a note
-      # back... this step runs every time, no exceptions") gives a concrete,
-      # checkable signal: if the transcript of tool calls never actually
-      # invokes crisp-post-note.mjs, the agent didn't complete its mandatory
-      # last step, regardless of what exit code it returned -- fail the step
-      # so this shows up instead of silently vanishing.
+      # opencode's CLI can exit 0 even when it never finished (e.g. an
+      # unrecovered rate limit mid-run). The prompt's rule 5 requires the
+      # agent to always call crisp-post-note.mjs as its last step -- if the
+      # tool-call transcript never shows that call, treat it as a failure
+      # regardless of exit code, instead of silently losing the conversation.
       - name: Investigate and act
         working-directory: workspace
         env:
@@ -134,10 +115,8 @@ jobs:
             --auto \
             --format json \
             > /tmp/opencode-output.json
-          # The raw NDJSON stream is unreadable as a step summary (hundreds
-          # of tool-call events, full file contents, grep dumps) -- write a
-          # human-readable one instead, and keep the raw file around for the
-          # completion check below and for real debugging via job logs.
+          # The raw NDJSON stream is unreadable as a step summary -- write a
+          # human-readable one, and keep the raw file for the check below and job-log debugging.
           node "$GITHUB_WORKSPACE/.bot-tools/scripts/summarize-investigation.mjs" /tmp/opencode-output.json >> "$GITHUB_STEP_SUMMARY"
           if ! grep -q "crisp-post-note.mjs" /tmp/opencode-output.json; then
             echo "::error::Agent never called crisp-post-note.mjs -- it did not complete its mandatory last step (likely died mid-run, e.g. an unrecovered rate limit). Session ${{ matrix.session_id }} was left with no GitHub-side outcome and no note back to the customer."

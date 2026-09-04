@@ -28,11 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # BOT_TOKEN_THEMEGRILL, not BOT_TOKEN: this repo now lives in
-          # themegrill (transferred from wpeverest), so only the
-          # themegrill-scoped token can write to it. BOT_TOKEN is still
-          # used elsewhere in this file for reaching wpeverest product repos.
-          token: ${{ secrets.BOT_TOKEN_THEMEGRILL }} # needs contents:write here to commit the advanced cursor
+          # This repo lives in themegrill, so only the themegrill-scoped
+          # token can write to it (needed to commit the advanced cursor).
+          # BOT_TOKEN (below) is for reaching wpeverest product repos instead.
+          token: ${{ secrets.BOT_TOKEN_THEMEGRILL }}
 
       - uses: actions/setup-node@v4
         with:
@@ -41,10 +40,9 @@ jobs:
       - name: Classify
         id: classify
         env:
-          # Two separate Crisp accounts (different logins), each with its own
-          # credential set -- see config/inbox-to-repo.json for how the
-          # account keys below (USER_REGISTRATION, THEMEGRILL) map to repos.
-          # Add a new triple here whenever a new Crisp account is onboarded.
+          # One credential triple per Crisp account -- see config/inbox-to-repo.json
+          # for the account-key-to-repo mapping. Add a triple here when
+          # onboarding a new account (see the onboard-crisp-account skill).
           CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
           CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
           CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
@@ -82,19 +80,12 @@ jobs:
         run: node scripts/crisp-dedupe-active.mjs
 
       # Retries on a non-fast-forward push: master can move between this
-      # job's checkout and this step (e.g. an unrelated PR merging, or another
-      # run of this same workflow, in the meantime) -- observed for real, both
-      # as a clean divergence AND as a genuine content conflict on
-      # state/cursor.json's single timestamp line. `-X ours` auto-resolves any
-      # conflict by keeping this run's own state, which is the right call for
-      # cursor.json (we want the latest run's timestamp to win) and an
-      # acceptable tradeoff for active-notified.json (a rare lost entry from a
-      # concurrent run just gets re-checked and re-notified later, not lost
-      # forever). Steps here must not rely on bash's default errexit (`-e`,
-      # which GitHub Actions bash steps run with) to stop the loop -- a
-      # failing git command inside the loop needs to be handled explicitly,
-      # or errexit kills the whole script on the FIRST conflict instead of
-      # retrying, which is exactly what happened before this fix.
+      # job's checkout and this step. `-X ours` auto-resolves any conflict by
+      # keeping this run's own state -- correct for cursor.json (latest
+      # timestamp should win), and an acceptable tradeoff elsewhere (a rare
+      # lost entry just gets re-checked next run, not lost forever). `set +e`
+      # matters: bash's default errexit would otherwise abort the whole
+      # script on the first conflict instead of retrying.
       - name: Commit advanced state
         run: |
           set +e

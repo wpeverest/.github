@@ -1,9 +1,7 @@
-// Shared classification logic between crisp-classify.mjs (the scheduled
-// scan) and crisp-resolve-dispatch.mjs (the instant single-session
-// trigger). Split out from crisp-classify.mjs specifically because that
-// file runs its own main() unconditionally at the bottom -- importing
-// anything from it directly would trigger a full Stage 1 scan as a side
-// effect of the import.
+// Shared classification logic between crisp-classify.mjs and
+// crisp-resolve-dispatch.mjs. Split out because crisp-classify.mjs runs its
+// own main() unconditionally at the bottom -- importing from it directly
+// would trigger a full scan as a side effect.
 import { getInboxKey } from "./crisp-client.mjs";
 import { chatJSON } from "./openai-client.mjs";
 

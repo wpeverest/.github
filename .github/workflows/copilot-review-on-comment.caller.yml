@@ -1,13 +1,9 @@
 # TEMPLATE -- copy into a consuming repo as
 # .github/workflows/copilot-review-on-comment.yml
 #
-# `secrets: inherit` looks like it should work here but doesn't for a
-# themegrill repo -- it only inherits secrets when the caller and the
-# reusable workflow are in the SAME organization. themegrill/.github lives in
-# wpeverest, so a themegrill caller needs the secret passed explicitly by
-# name instead, which works across the org boundary. Confirmed for real:
-# every themegrill repo failed identically ("Secret BOT_TOKEN is required,
-# but not provided while calling") until switched to this explicit form.
+# `secrets: inherit` looks like it should work but doesn't for a themegrill
+# repo: it only inherits within the same org, and themegrill/.github lives in
+# wpeverest. Pass the secret explicitly by name instead, as below.
 name: Copilot review on comment
 
 on:

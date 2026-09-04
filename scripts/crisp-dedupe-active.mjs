@@ -100,17 +100,15 @@ async function main() {
       if (!match) continue;
 
       // Skip if the matched issue is the one THIS conversation itself
-      // caused -- otherwise a still-open conversation matches back to its
-      // own issue every rescan (confirmed for real once).
+      // caused -- otherwise it matches back to its own issue every rescan.
       if ((match.body ?? "").includes(conversation.session_id)) {
         notified.add(conversation.session_id);
         console.log(`[${accountKey}] ${conversation.session_id}: matched ${repo}#${match.number} but it's the issue's own source -- skipping`);
         continue;
       }
 
-      // state/active-notified.json can lose a recent addition to a racy git
-      // rebase (crisp-triage.yml's state commit uses `-X ours`), causing
-      // duplicate comments on a real issue -- confirmed for real. Guard
+      // state/active-notified.json can lose a recent entry to a racy git
+      // rebase (crisp-triage.yml's state commit uses `-X ours`) -- guard
       // against GitHub's own comment history instead, which has no such race.
       const existingComments = await listIssueComments(repo, match.number);
       const alreadyCommented = existingComments.some((c) =>

@@ -1,15 +1,12 @@
 #!/usr/bin/env node
 // Instant single-session path: resolve exactly ONE Crisp conversation to a
-// repo/kind, right now, triggered externally (an n8n workflow watching
-// Crisp's webhooks for a "!tg-autopilot investigate" note, calling this via
-// repository_dispatch) rather than waiting for the next scheduled scan.
+// repo/kind right now (triggered externally via repository_dispatch, e.g. a
+// webhook watching for a manual note) rather than waiting for the next scan.
 //
-// Mirrors crisp-classify.mjs's manual-note escalation path exactly --
-// skipClassifier: true, since a human already decided this is worth a
-// look -- but for one specific session_id instead of scanning every active
-// conversation for a note. Updates the SAME state files
-// (state/escalated.json, state/investigated.json) so the scheduled scan's
-// own manual-note detection won't redundantly re-trigger this session later.
+// Mirrors crisp-classify.mjs's manual-note escalation path (skipClassifier:
+// true) for one session_id instead of scanning every active conversation.
+// Updates the same state files so the scheduled scan won't re-trigger this
+// session later.
 import { readFile, writeFile } from "node:fs/promises";
 import { credsForAccount, fetchRawMessages, countManualTriggerNotes } from "./crisp-client.mjs";
 import { classifyAndRoute } from "./crisp-classifier.mjs";
@@ -33,9 +30,8 @@ async function main() {
     JSON.parse(await readFile("state/investigated.json", "utf8").catch(() => "[]"))
   );
 
-  // Which account owns this session isn't known upfront (the dispatch
-  // payload only carries session_id) -- try each configured account's
-  // credentials until one actually returns a transcript for it.
+  // The dispatch payload only carries session_id, not which account owns it
+  // -- try each configured account until one returns a transcript.
   for (const [accountKey, accountConfig] of Object.entries(accounts)) {
     let creds;
     try {
@@ -44,12 +40,8 @@ async function main() {
       continue; // not yet credentialed -- can't be the source
     }
 
-    // A session that belongs to a different account isn't just an empty
-    // result -- Crisp returns a hard 404 "conversation_not_found" for it,
-    // which fetchRawMessages lets propagate as a thrown error. Confirmed
-    // for real: without this catch, the first configured account tried
-    // (whichever happens to not own the session) crashes the whole script
-    // before ever reaching the account that actually does.
+    // A session belonging to a different account 404s (not an empty result),
+    // which fetchRawMessages throws -- catch it and just try the next account.
     let messages;
     try {
       messages = await fetchRawMessages(creds, TARGET_SESSION_ID);
@@ -71,12 +63,10 @@ async function main() {
     }
 
     console.log(`[${accountKey}] found ${TARGET_SESSION_ID}, resolving repo...`);
-    // { session_id } only, not the full Crisp conversation object -- an
-    // `inboxes`-mode account needs meta.segments to resolve, which isn't
-    // available here. Not a gap in practice: neither configured account
-    // (USER_REGISTRATION is `repo`-mode, THEMEGRILL is `products`-mode)
-    // needs it, and an unmapped result below fails loudly rather than
-    // guessing if a future `inboxes`-mode account ever hits this path.
+    // { session_id } only, not the full conversation object -- an
+    // `inboxes`-mode account would need meta.segments (not available here),
+    // but no configured account uses that mode; an unmapped result below
+    // fails loudly rather than guessing if one ever does.
     const result = await classifyAndRoute(accountConfig, { session_id: TARGET_SESSION_ID }, transcript, {
       skipClassifier: true,
     });
