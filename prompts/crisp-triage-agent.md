@@ -21,8 +21,10 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
    If you find a genuine match for that specific item, **first check whether that issue's own `Source:` line already references this exact conversation** (`{{SESSION_ID}}` or `{{CONVERSATION_URL}}`) -- if so, this conversation is not a recurrence, it's the one that caused this issue in the first place. Skip commenting for that item; it's neither a new issue nor a duplicate, but still record it as "already tracked" for the note in step 5.
 
    Otherwise, if it's a genuine match from a *different* conversation:
-   - Comment on it noting this is a recurrence, briefly stating what this conversation adds, and linking `[Crisp conversation]({{CONVERSATION_URL}})` as the source (do not repeat the full diagnosis if the issue already has one).
+   - Comment on it -- for a bug, note that another user is hitting the same issue; for a feature request, note that another user has made the same request (don't call a repeated request a "recurrence", it isn't one) -- briefly stating what this conversation adds, and linking `[Crisp conversation]({{CONVERSATION_URL}})` as the source (do not repeat the full diagnosis if the issue already has one).
    - Do not file a new issue for something already tracked.
+
+   **Feature requests need a stricter match than bugs.** Two customers can want different things from a similar-sounding or vaguely-titled request -- only treat it as the same request if this transcript asks for the exact same capability, not just the same general area of the product. A question about whether something already exists, or how to configure it, is a how-to question, not a match for an open feature request.
 
 3. **For each item with a genuine match nothing tracks yet**, file one issue per item:
    ```
