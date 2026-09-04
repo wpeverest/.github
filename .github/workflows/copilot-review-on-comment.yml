@@ -27,12 +27,8 @@ jobs:
     if: github.event_name == 'pull_request_target' && github.event.action == 'opened'
     runs-on: ubuntu-latest
     steps:
-      # Same poll-don't-just-retry approach as the "Request Copilot review"
-      # step in the request-review job below (see its comment for the full
-      # reasoning/evidence) -- a single check-then-request here would hit the
-      # identical false-failure risk: Copilot can take over a minute to
-      # actually land, so a one-shot attempt can look like a no-op while it's
-      # still quietly working.
+      # Poll rather than check-once -- Copilot can take over a minute to
+      # actually land (see the request-review job's copy of this step).
       - name: Request Copilot review
         env:
           GH_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -64,23 +60,16 @@ jobs:
           echo "::warning::Copilot review request not confirmed after 3 minutes on $REPO#$PR. This is a known intermittent GitHub platform issue, not a config problem -- it may still complete later."
 
   request-review:
-    # Only PR comments (issue_comment fires for both issues and PR conversation
-    # comments; github.event.issue.pull_request only exists on the PR case).
-    # Excluding the bot's own comments is required, not just tidy: its
-    # failure-notice text below tells people to retry the trigger phrase, so
-    # without this guard that notice re-triggers itself forever.
+    # Only PR comments (issue_comment fires for issues too). Excluding the
+    # bot's own comments is required, not just tidy -- see write-safe-bot-workflow skill.
     if: |
       github.event.issue.pull_request != null &&
       github.event.comment.user.login != 'tg-autopilot' &&
       contains(github.event.comment.body, inputs.trigger-phrase)
     runs-on: ubuntu-latest
     steps:
-      # Anyone can comment on a public repo. Since each trigger spends
-      # tg-autopilot's own Copilot usage, only act for commenters who meet
-      # min-permission -- not just anyone passing by. The authorized decision
-      # is computed once here (rank comparison, "at least" semantics), so
-      # every later step just checks one plain boolean instead of repeating
-      # this logic.
+      # Each trigger spends tg-autopilot's own Copilot usage, so gate on
+      # min-permission. Computed once here as a plain boolean for later steps.
       - name: Check commenter's permission
         id: perm
         env:
@@ -108,17 +97,11 @@ jobs:
           gh api "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
             -f content='eyes' --silent
 
-      # `gh pr edit --add-reviewer @copilot` is a confirmed-flaky GitHub
-      # platform call, but the failure mode that actually matters here is
-      # latency, not silent no-ops: Copilot can take well over a minute
-      # between the request landing and the review showing up at all, so a
-      # quick handful of retries just reports false failures while Copilot
-      # is still legitimately working in the background (confirmed on
-      # themegrill/zakra#350 -- reported "failed" after 5x5s, then finished
-      # and posted a real review a minute later). So: request once, then
-      # poll for a while for either a pending request or a completed
-      # review, only re-issuing the request if nothing shows up for a
-      # while.
+      # `gh pr edit --add-reviewer @copilot` is confirmed flaky at the
+      # platform level: Copilot can take well over a minute to actually show
+      # up, so a quick check-and-fail reports false failures while it's still
+      # legitimately working. Request once, poll for a while, only re-issue
+      # if nothing shows up.
       - name: Request Copilot review
         if: steps.perm.outputs.authorized == 'true'
         env:

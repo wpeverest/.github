@@ -1,42 +1,32 @@
 #!/usr/bin/env node
-// Ensures every repo listed in config/copilot-review-repos.json has (a) the
-// Copilot-review-on-comment caller workflow, with the CORRECT content, and
-// (b) its own repo-level BOT_TOKEN secret (see setRepoSecret below for why
-// repo-level, not relying on the org-level secret). The workflow-file part
-// is safe to re-run indefinitely: a repo whose file already matches the
-// canonical content is skipped; a repo missing it, or with stale/wrong
-// content (e.g. a fix like this one), gets a PR. The secret is simply
-// re-set on every run -- cheap, and always correct regardless of any
-// manual changes made to the org-level secret in the meantime.
+// Ensures every repo in config/copilot-review-repos.json has the caller
+// workflow (with current, canonical content) and its own repo-level
+// BOT_TOKEN secret. Safe to re-run indefinitely: a repo already matching the
+// canonical content is skipped; anything missing or stale gets a PR. The
+// secret is simply re-set every run -- cheap, and always correct.
 //
-// Deliberately opt-in via an explicit list, not "every repo in the org":
-// most repos in both orgs are docs/marketing/tooling, not products that
-// need PR-review automation, and there's no reliable automatic way to tell
-// those apart -- a human still decides once per repo, but only by adding a
-// name to a list, not by hand-authoring a workflow file.
+// Deliberately opt-in via an explicit list, not "every repo in the org" --
+// most repos in both orgs are docs/marketing/tooling, not products that need
+// PR-review automation, and there's no reliable way to tell those apart
+// automatically.
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
-// libsodium-wrappers' own ESM build is broken (a real, known packaging bug
-// -- its .mjs entry imports a file that doesn't exist in the published
-// package). Load it via its CJS build instead, which works fine.
+// libsodium-wrappers' ESM build is broken (known packaging bug) -- load the
+// CJS build instead.
 const sodium = createRequire(import.meta.url)("libsodium-wrappers");
 
 const CALLER_WORKFLOW_PATH = ".github/workflows/copilot-review-on-comment.yml";
 const REPO_SECRET_NAME = "BOT_TOKEN";
 const BRANCH_NAME = "tg-autopilot/add-copilot-review-on-comment";
 
-// The deployed file, not the docs/copilot-review-on-comment.caller.yml
-// template verbatim -- that one carries a "TEMPLATE, copy this" comment
-// meant for a human doing this by hand, which doesn't belong in a file this
-// script deploys itself.
+// The deployed file -- not the docs/copilot-review-on-comment.caller.yml
+// template verbatim, which carries a "copy this by hand" comment that
+// doesn't belong in a script-generated file.
 //
 // `secrets: BOT_TOKEN: ...` explicitly, not `secrets: inherit` -- inherit
-// only works when the caller and the reusable workflow are in the SAME
-// organization. themegrill/.github lives in wpeverest, so a themegrill
-// caller needs the secret passed by name to work across the org boundary.
-// Confirmed for real: every themegrill repo failed identically ("Secret
-// BOT_TOKEN is required, but not provided while calling") with `inherit`.
+// only works within the same org. themegrill/.github lives in wpeverest, so
+// a themegrill caller needs the secret passed by name to cross that boundary.
 const CALLER_WORKFLOW_CONTENT = `name: Copilot review on comment
 
 on:
@@ -68,15 +58,10 @@ async function gh(org, path, options = {}) {
   return res;
 }
 
-// Sets a REPO-LEVEL secret directly, rather than relying on the org-level
-// one. Confirmed for real: GitHub Free plan org secrets cannot reach
-// private repositories at all -- the repository-access setting silently
-// only offers "Public repositories" for a Free-plan org, so a private repo
-// like a themegrill Pro product never actually receives the org secret's
-// value (it resolves as an empty string, not an error). A repo-level
-// secret has no such restriction on any plan, and always takes precedence
-// over an org secret of the same name, so this works unconditionally --
-// no dependency on org plan tier or repo visibility ever again.
+// Sets a REPO-LEVEL secret rather than relying on the org-level one --
+// GitHub Free org secrets can't reach private repos at all (silently resolve
+// empty). A repo-level secret has no such restriction and always takes
+// precedence, so this works unconditionally. See propagate-shared-secret skill.
 async function setRepoSecret(org, repo) {
   const value = tokenForOrg(org);
   const keyRes = await gh(org, `/repos/${org}/${repo}/actions/secrets/public-key`);
@@ -118,10 +103,8 @@ async function syncWorkflow(org, repo) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ref: `refs/heads/${BRANCH_NAME}`, sha: baseSha }),
   });
-  // 422 means the branch already exists -- a previous run's PR is likely
-  // still open. Reuse it rather than failing. If it's stale (pointing at an
-  // old base commit), that's fine here since we still read the file's sha
-  // fresh from that same branch just below.
+  // 422 means the branch already exists (a previous run's PR is likely still
+  // open) -- reuse it; the file's sha is read fresh from it just below.
   if (!createRefRes.ok && createRefRes.status !== 422) {
     throw new Error(`Failed to create branch on ${org}/${repo}: ${createRefRes.status} ${await createRefRes.text()}`);
   }
@@ -153,8 +136,7 @@ async function syncWorkflow(org, repo) {
       body: "Adds the reusable PR-review workflow, called from themegrill/.github. It requests Copilot as a reviewer when a PR opens, and lets accounts with write access or higher request a Copilot review by commenting `@tg-autopilot review`.",
     }),
   });
-  // 422 here typically means a PR from this branch already exists -- the
-  // commit we just pushed to that branch still updates it either way.
+  // 422 usually means a PR from this branch already exists; our commit still updated it.
   if (!prRes.ok && prRes.status !== 422) {
     throw new Error(`Failed to open PR on ${org}/${repo}: ${prRes.status} ${await prRes.text()}`);
   }

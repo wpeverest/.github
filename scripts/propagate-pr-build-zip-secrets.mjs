@@ -1,25 +1,10 @@
 #!/usr/bin/env node
-// Copies ARTIFACTS_KEY and ARTIFACTS_SECRET -- the shared S3 bucket
-// credentials pr-build-zip.yml uploads to -- down as REPO-LEVEL secrets on
-// every repo in config/copilot-review-repos.json, both orgs.
-//
-// Originally this only covered themegrill, on the assumption that wpeverest
-// repos would get these fine via `secrets: inherit` (same org as the
-// reusable workflow). Confirmed wrong for real: wpeverest is ALSO on
-// GitHub's Free plan, which silently blocks an org secret from reaching any
-// PRIVATE repo -- and 45 of wpeverest's 48 target repos are private. Only
-// the org's few public repos (where this was first tested) ever actually
-// got the secret via inherit. Exactly the same failure mode already fixed
-// for BOT_TOKEN in the Copilot-review rollout, just not yet applied to
-// these two secrets on this org.
-//
-// Simplest fix: give every repo in both orgs its own repo-level copy,
-// unconditionally. A repo-level secret always wins over an org one and has
-// no plan/visibility restriction, and `secrets: inherit` already includes
-// repo-level secrets -- so wpeverest callers don't need to change from
-// `inherit` to naming secrets explicitly, they just start working once the
-// repo-level copy exists. Setting it on the handful of already-working
-// public repos too is harmless and keeps this script simple.
+// Copies ARTIFACTS_KEY and ARTIFACTS_SECRET (the shared S3 bucket
+// credentials pr-build-zip.yml uploads to) down as REPO-LEVEL secrets on
+// every repo in config/copilot-review-repos.json, both orgs -- unconditionally,
+// including the few repos that would already get them via org-level access.
+// See the propagate-shared-secret skill for why: GitHub Free's org secrets
+// silently never reach a private repo, on either org.
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 

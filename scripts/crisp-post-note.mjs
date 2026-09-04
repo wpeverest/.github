@@ -2,14 +2,11 @@
 // Posts a private note into a Crisp conversation. Called by the Stage 2
 // agent so support gets a signal even when no issue was filed.
 //
-// A conversation investigated more than once (repeat auto-escalation, or a
-// fresh manual note) can get the same "matched/created issue #N" note
-// posted repeatedly. Skip only if EVERY issue URL in the new note is already
-// mentioned in an existing note -- a note can now reference two issues (a
-// bug and a feature request found in the same conversation), and one of
-// them being new information is enough reason to still post. Keyed on the
-// URL, not exact wording, since the agent free-writes each note. A note
-// with no issue URL at all isn't deduped this way.
+// A conversation investigated more than once can get the same "matched/
+// created issue #N" note posted repeatedly. Skip only if EVERY issue URL in
+// the new note is already mentioned in an existing note -- a note can
+// reference two issues, and one being new is reason enough to still post.
+// Keyed on the URL, not wording. A note with no issue URL isn't deduped.
 import { readFile } from "node:fs/promises";
 import { postNote, fetchRawMessages } from "./crisp-client.mjs";
 
@@ -19,15 +16,12 @@ if (!sessionId || !noteArg) {
   process.exit(1);
 }
 
-// `@path` (curl's own convention) reads the note from a file instead of the
-// argument itself -- a real multi-line note surviving as a single shell
-// argument is fragile (confirmed for real: the agent embedded literal `\n`
-// text instead of actual newlines, since bash doesn't interpret `\n` inside
-// double quotes). A file has no such quoting problem.
+// `@path` (curl's convention) reads the note from a file instead of the
+// argument -- a multi-line note as a shell argument is fragile (bash
+// doesn't interpret literal `\n` inside double quotes).
 const rawNote = noteArg.startsWith("@") ? await readFile(noteArg.slice(1), "utf8") : noteArg;
 
-// Safety net regardless of source: normalize literal backslash-n/backslash-
-// r-n sequences to real newlines, in case they made it through anyway.
+// Safety net: normalize literal \n / \r\n sequences to real newlines in case any made it through.
 const note = rawNote.replace(/\\r\\n|\\n/g, "\n");
 
 const creds = {

@@ -1,24 +1,10 @@
 #!/usr/bin/env node
-// Ensures every repo listed in config/copilot-review-repos.json (same list
-// as the Copilot-review rollout -- reused deliberately, see that script's
-// comment on why it's an opt-in list, not "every repo in the org") has a
-// caller workflow for the reusable themegrill/.github pr-build-zip.yml, which
-// builds a testable, installable ZIP on every PR and posts a download link.
-//
-// Unlike propagate-copilot-review.mjs, the content this script writes is NOT
-// one canonical constant -- every repo's build tooling differs (grunt vs.
-// gulp vs. plain scripts, yarn vs. pnpm vs. npm, PHP version, whether the
-// build already runs composer internally...), so each repo gets its own
-// generated file, detected from that repo's own package.json/Gruntfile.js/
-// gulpfile.js/composer.json via the Contents API. See detectBuildConfig()
-// for the detection heuristics and their reasoning.
-//
-// Also unlike the Copilot script, this one does NOT touch a repo that
-// already has .github/workflows/pr-build-zip.yml with a
-// `uses: themegrill/.github/.github/workflows/pr-build-zip.yml` line in it --
-// a human tuned that file by hand (like user-registration's), and our
-// heuristics are not trusted to safely override deliberate human tuning.
-// This is a one-shot bootstrap per repo, not an ongoing sync.
+// One-shot bootstrap: for every repo in config/copilot-review-repos.json,
+// detects that repo's build tooling (package.json/Gruntfile.js/gulpfile.js/
+// composer.json) and opens a PR adding a generated pr-build-zip.yml caller.
+// Never touches a repo that already has one -- a human may have hand-tuned
+// it. See the onboard-pr-build-zip-repo skill for the detection heuristics
+// and how to fix a wrong guess.
 import { readFile } from "node:fs/promises";
 
 const CONFIG_PATH = "config/copilot-review-repos.json";
@@ -26,8 +12,7 @@ const WORKFLOW_PATH = ".github/workflows/pr-build-zip.yml";
 const REUSABLE_WORKFLOW_REF = "themegrill/.github/.github/workflows/pr-build-zip.yml";
 const BRANCH_NAME = "tg-autopilot/add-pr-build-zip";
 
-// Shared bucket for both orgs -- copied verbatim into every generated file,
-// per the rollout's secrets/auth model (see task background).
+// Shared bucket for both orgs, copied verbatim into every generated file.
 const ARTIFACTS_BUCKET = "themegrill-pr-artifacts";
 const PUBLIC_BASE_URL = "https://themegrill-pr-artifacts.s3.amazonaws.com";
 const S3_REGION = "us-east-1";
@@ -48,8 +33,7 @@ async function gh(org, path, options = {}) {
   return res;
 }
 
-// Returns decoded text content of a repo file, or null if it doesn't exist.
-// Used for every "does this file exist / what's in it" probe below.
+// Decoded text content of a repo file, or null if it doesn't exist.
 async function getFile(org, repo, path) {
   const res = await gh(org, `/repos/${org}/${repo}/contents/${path}`);
   if (res.status === 404) return null;
@@ -58,19 +42,11 @@ async function getFile(org, repo, path) {
   return Buffer.from(content, "base64").toString("utf8");
 }
 
-// Node version ranges we know how to translate into a concrete
-// actions/setup-node version string. Anything unrecognized falls through to
-// the '20.x' default rather than guessing at a range we can't parse safely.
-// `engines.node`/composer's `require.php` commonly declare an ancient
-// minimum-support floor (">=0.8.0", ">=5.6.20") left over from years-old
-// boilerplate -- that is NOT the version anyone actually wants to build
-// with, and taking it literally breaks the build outright (confirmed for
-// real: estore's ">=0.8.0" produced literal Node 0.x, which doesn't even
-// have a working npm; user-registration-pro's ">=5.6.20" produced PHP 5.6,
-// too old for its own composer dependencies). Both functions below only
-// trust the declared number when it's at or above a sane modern floor --
-// otherwise these fields are pure noise and the tool's own sensible
-// default is more likely correct than anything parsed from them.
+// engines.node / composer's require.php often declare an ancient minimum
+// (">=0.8.0", ">=5.6.20") left over from old boilerplate -- not a version
+// anyone builds with today. Taking it literally breaks the build (e.g. it
+// has produced literal Node 0.x). Only trust the declared number when it's
+// at or above a sane modern floor; otherwise use the default.
 function nodeVersionFromEngines(engines) {
   const raw = engines?.node;
   const DEFAULT = "20.x";
@@ -97,34 +73,26 @@ function packageManagerFromField(field) {
   return match ? match[1] : null;
 }
 
-// Looks for a script that shells out to grunt/gulp with a real task name
-// (e.g. "grunt release:dev", "gulp release"), matching the pattern seen in
-// both known-working examples. Returns the task invocation string (what
-// comes after the tool name) or null if the script doesn't call that tool.
+// Finds a script that shells out to grunt/gulp with a task name (e.g.
+// "grunt release:dev"). Returns what comes after the tool name, or null.
 function extractToolInvocation(scriptBody, tool) {
   const match = scriptBody.match(new RegExp(`${tool}\\s+([\\w:.-]+)`));
   return match ? match[1] : null;
 }
 
-// Core detection logic. Takes the raw file contents already fetched for one
-// repo and returns either a build config object or null (meaning: nothing
-// safe to auto-generate, skip and flag for a human).
+// Core detection logic: turns one repo's raw file contents into a build
+// config, or null if nothing safe to auto-generate (skip, flag for a human).
 function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulpfileRaw, lockfiles, distignoreExists, repoName }) {
   const packageJson = packageJsonRaw ? JSON.parse(packageJsonRaw) : null;
   const composerJson = composerJsonRaw ? JSON.parse(composerJsonRaw) : null;
 
   // --- package manager ---------------------------------------------------
-  // Priority: explicit "packageManager" field (Corepack's own source of
-  // truth) > lockfile presence > yarn as a last-resort default. We only
-  // reach the yarn default when NOTHING else indicates a choice, per the
-  // task spec -- not used as a tie-breaker ahead of real evidence.
+  // Priority: explicit "packageManager" field > lockfile presence > yarn as
+  // a last-resort default.
   let packageManager = packageManagerFromField(packageJson?.packageManager);
-  // Whether pnpm/action-setup can auto-detect a version via corepack's
-  // "packageManager" field -- if not, and we're using pnpm, the reusable
-  // workflow needs an explicit pnpm-version or the setup step fails
-  // outright with "No pnpm version is specified" (confirmed for real on
-  // themegrill/colormag, which has no packageManager field). Only tracked
-  // for pnpm specifically -- npm/yarn don't need action-setup at all.
+  // Without a "packageManager" field, pnpm/action-setup can't auto-detect a
+  // version and fails outright ("No pnpm version is specified") -- pin a
+  // fallback in that case. Not needed for npm/yarn.
   const hasPackageManagerField = Boolean(packageManager);
   if (!packageManager) {
     if (lockfiles.pnpm) packageManager = "pnpm";
@@ -132,12 +100,6 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
     else if (lockfiles.npm) packageManager = "npm";
     else packageManager = "yarn";
   }
-  // A safe, currently-supported pnpm major version -- only used as a
-  // fallback when the repo gives us nothing to auto-detect from. Never
-  // overrides a repo's own declared version, which corepack already
-  // handles fine (confirmed on user-registration/user-registration-pro,
-  // both of which declare "packageManager": "pnpm@..." and work today
-  // with no explicit pnpm-version passed).
   const pnpmVersion = packageManager === "pnpm" && !hasPackageManagerField ? "9" : null;
 
   // --- node / php versions ------------------------------------------------
@@ -145,10 +107,9 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
   const phpVersion = phpVersionFromComposer(composerJson);
 
   // --- build command -------------------------------------------------------
-  // Prefer a script literally named "release", then "build" (per spec: if
-  // both exist, "release" wins -- it's the more specific/intentional name
-  // for "package a distributable", whereas "build" often just means
-  // "compile assets" in a lot of these repos' package.json files).
+  // Prefer a script named "release" over "build" -- "release" is the more
+  // intentional name for "package a distributable"; "build" often just
+  // means "compile assets" in these repos.
   const scripts = packageJson?.scripts || {};
   let buildCommand = null;
   let composerInstall = Boolean(composerJson);
@@ -158,61 +119,41 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
     const body = scripts[scriptName];
     if (!body) continue;
 
-    // If the script just shells out to grunt/gulp with a real task name we
-    // can see, run that task directly via the package manager (matches the
-    // known-working examples exactly: `pnpm exec grunt release:dev`,
-    // `... && gulp release`) rather than indirecting through "run
-    // <scriptName>" -- this keeps the generated command legible and lets us
-    // reason about composer-install below by inspecting the SAME Gruntfile.
+    // If the script shells out to grunt/gulp with a real task name, run
+    // that task directly via the package manager rather than indirecting
+    // through "run <scriptName>" -- keeps the generated command legible.
     const gruntTask = gruntfileRaw ? extractToolInvocation(body, "grunt") : null;
     const gulpTask = gulpfileRaw ? extractToolInvocation(body, "gulp") : null;
 
-    // Tracks whether buildCommand already packages a zip itself (a grunt/gulp
-    // release task, matching the known-working examples) vs. is just an
-    // asset-compile script with no packaging step at all -- used below to
-    // decide whether the .distignore fallback packaging needs appending.
+    // Whether buildCommand already packages a zip itself (a grunt/gulp
+    // release task) vs. is just an asset-compile script with no packaging
+    // step -- decides whether the .distignore fallback below is needed.
     let packagesItself = false;
 
     if (gruntTask) {
       buildCommand = `${packageManager} exec grunt ${gruntTask}`;
       packagesItself = true;
-      // Composer running inside the Grunt task itself is the exact situation
-      // documented in user-registration's caller file: its Gruntfile.js runs
-      // `composer install --no-dev` as part of the release task, so this
-      // workflow's own composer-install step would just duplicate that work.
-      // We can't run the task to observe this directly, so we grep the
-      // Gruntfile source for evidence of it calling composer itself.
+      // If the Gruntfile itself already runs composer (seen in the wild),
+      // don't duplicate that in composer-install.
       if (gruntfileRaw && /composer\s+install/i.test(gruntfileRaw)) {
         composerInstall = false;
       }
     } else if (gulpTask) {
-      // yarn build && yarn build:blocks && gulp release -- the known gulp
-      // example chains its own script(s) ahead of the gulp task, so we keep
-      // whatever came before the gulp invocation in the original script body
-      // (that's part of the packaging pipeline, not an artifact of parsing).
+      // Keep the full script body (e.g. "yarn build && gulp release") --
+      // anything chained before the gulp call is part of the pipeline.
       buildCommand = body;
       packagesItself = true;
     } else {
-      // No recognizable grunt/gulp indirection -- this is very likely just an
-      // asset-compile script (wp-scripts build, webpack, ...) with no
-      // packaging step of its own. Confirmed for real across a wide sample
-      // of repos after the pnpm/PHP-version fixes: dozens still failed with
-      // "No ZIP matched 'release/*.zip'" because their "build" script
-      // genuinely never produces a zip anywhere -- packaging happens
-      // separately (a plugin's own custom release workflow, or nothing
-      // automated yet). See the .distignore fallback below for the one
-      // structural signal reliable enough to act on automatically.
+      // No grunt/gulp indirection -- likely just an asset-compile script
+      // (wp-scripts build, webpack, ...) with no packaging step of its own.
+      // See the .distignore fallback below for the one structural signal
+      // reliable enough to act on automatically.
       buildCommand = `${packageManager} run ${scriptName}`;
     }
 
-    // Neither grunt nor gulp is doing the packaging, but the repo has a
-    // .distignore -- the exact convention user-registration-pro's own
-    // (manually written, pre-existing) release automation used: rsync the
-    // repo into a folder named after itself excluding .distignore's
-    // patterns, then zip that folder. This is a real structural signal
-    // confirmed present on the majority of repos that otherwise had no
-    // buildCommand producing a zip anywhere -- not a guess the way "assume
-    // release/*.zip" was.
+    // Neither grunt nor gulp packages it, but a .distignore exists: rsync
+    // the repo into a folder named after itself excluding those patterns,
+    // then zip that folder -- a real convention seen across several repos.
     if (!packagesItself && distignoreExists) {
       buildCommand = `${buildCommand} && mkdir -p ${repoName} && rsync -rc --exclude-from=.distignore ./ ./${repoName} --delete --delete-excluded && zip -r ${repoName}.zip ${repoName}`;
       zipGlob = `${repoName}.zip`;
@@ -220,10 +161,8 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
     break;
   }
 
-  // Last resort: a script with "zip" or "dist" literally in its name or
-  // body, since spec says to use best judgement from file contents rather
-  // than inventing a command. Still real evidence, just weaker than an
-  // exact "release"/"build" name match.
+  // Last resort: a script with "zip" or "dist" in its name or body -- weaker
+  // evidence than an exact "release"/"build" match, but still real evidence.
   if (!buildCommand) {
     const candidate = Object.entries(scripts).find(
       ([name, body]) => /zip|dist/i.test(name) || /zip|dist/i.test(body)
@@ -233,14 +172,13 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
     }
   }
 
-  // Nothing usable found -- per spec, skip rather than guess blindly.
+  // Nothing usable found -- skip rather than guess blindly.
   if (!buildCommand) return null;
 
   // --- zip glob -------------------------------------------------------------
-  // Only deviate from the shared default when we see explicit evidence (a
-  // "dist" directory referenced in the same script body or Gruntfile/gulpfile)
-  // that the repo's own tooling drops the zip somewhere else. Skipped when
-  // the .distignore fallback above already set zipGlob explicitly.
+  // Only deviate from the default when the repo's own script/Gruntfile/
+  // gulpfile references a "dist" output path. Skipped if .distignore above
+  // already set zipGlob explicitly.
   const combinedSource = [scripts.release, scripts.build, gruntfileRaw, gulpfileRaw].filter(Boolean).join("\n");
   if (zipGlob === "release/*.zip" && /dist\/.*\.zip/.test(combinedSource) && !/release\/.*\.zip/.test(combinedSource)) {
     zipGlob = "dist/*.zip";
@@ -251,8 +189,7 @@ function detectBuildConfig({ packageJsonRaw, composerJsonRaw, gruntfileRaw, gulp
 
 function renderSecretsBlock(org) {
   if (org === "wpeverest") return "    secrets: inherit\n";
-  // Cross-org `secrets: inherit` does not work (confirmed on the Copilot
-  // rollout) -- themegrill callers must name every secret explicitly.
+  // secrets: inherit doesn't cross orgs -- themegrill callers must name each secret.
   return [
     "    secrets:",
     "      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}",
@@ -290,9 +227,7 @@ ${renderSecretsBlock(org)}`;
 }
 
 async function processRepo(org, repo) {
-  // Skip if a caller workflow already exists there -- a human already tuned
-  // it (see file header). This is intentionally simpler than the Copilot
-  // script's sha-diffing: existence alone is the bar, we never overwrite.
+  // Skip if a caller workflow already exists -- never overwrite a human's tuning.
   const existing = await getFile(org, repo, WORKFLOW_PATH);
   if (existing !== null && existing.includes(`uses: ${REUSABLE_WORKFLOW_REF}`)) {
     return { status: "skipped-existing" };
@@ -329,7 +264,7 @@ async function processRepo(org, repo) {
 
   const workflowContent = renderWorkflow({ defaultBranch, org, config });
 
-  // --- branch/PR mechanics, mirroring propagate-copilot-review.mjs --------
+  // --- branch/PR mechanics (same pattern as propagate-copilot-review.mjs) --
   const refRes = await gh(org, `/repos/${org}/${repo}/git/ref/heads/${defaultBranch}`);
   if (!refRes.ok) throw new Error(`Failed to read ${defaultBranch} ref for ${org}/${repo}: ${refRes.status} ${await refRes.text()}`);
   const { object: { sha: baseSha } } = await refRes.json();
@@ -339,8 +274,7 @@ async function processRepo(org, repo) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ref: `refs/heads/${BRANCH_NAME}`, sha: baseSha }),
   });
-  // 422 means the branch already exists -- a previous run's PR is likely
-  // still open. Reuse it, same as the Copilot script does.
+  // 422 means the branch already exists (a previous run's PR is likely still open) -- reuse it.
   if (!createRefRes.ok && createRefRes.status !== 422) {
     throw new Error(`Failed to create branch on ${org}/${repo}: ${createRefRes.status} ${await createRefRes.text()}`);
   }
@@ -378,8 +312,7 @@ async function processRepo(org, repo) {
       body: prBody,
     }),
   });
-  // 422 typically means a PR from this branch already exists -- the commit
-  // we just pushed still updates it either way.
+  // 422 usually means a PR from this branch already exists; our commit still updated it.
   if (!prRes.ok && prRes.status !== 422) {
     throw new Error(`Failed to open PR on ${org}/${repo}: ${prRes.status} ${await prRes.text()}`);
   }

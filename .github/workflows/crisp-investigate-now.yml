@@ -1,9 +1,8 @@
 # Instant single-session path: investigate exactly ONE Crisp conversation
-# right now, bypassing the scheduled scan entirely. Fired by an n8n workflow
-# watching Crisp's webhooks for a "!tg-autopilot investigate" note (n8n
-# bridges Crisp's webhook to this repository_dispatch, since Crisp can't set
-# the Authorization header GitHub's API requires). workflow_dispatch is also
-# available for manual testing without needing the n8n side wired up.
+# right now, bypassing the scheduled scan. Fired by an n8n workflow bridging
+# Crisp's webhook to this repository_dispatch (Crisp can't set the
+# Authorization header GitHub's API needs directly). workflow_dispatch is
+# also available for manual testing.
 name: Crisp investigate now
 
 on:
@@ -33,7 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # BOT_TOKEN_THEMEGRILL, not BOT_TOKEN: this repo now lives in themegrill.
           token: ${{ secrets.BOT_TOKEN_THEMEGRILL }} # needs contents:write to commit updated state
 
       - uses: actions/setup-node@v4

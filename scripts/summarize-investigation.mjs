@@ -1,12 +1,9 @@
 #!/usr/bin/env node
-// Turns opencode's raw NDJSON event stream into a readable GitHub Actions
-// step summary. The full stream is still saved separately (for actual
-// debugging -- this is what we've been manually grep-ing through all day)
-// but it's unreadable as a step summary: hundreds of tool-call events with
-// full file contents and grep output. What a human actually wants there is
-// the agent's own final report, which the prompt already requires it to
-// produce as a structured "Investigation report:" note (see
-// prompts/crisp-triage-agent.md) -- the last "text" event in the stream.
+// Turns opencode's raw NDJSON event stream (hundreds of tool-call events,
+// unreadable as a step summary) into the agent's own final report -- the
+// structured "Investigation report:" note the prompt requires it to produce
+// (see prompts/crisp-triage-agent.md), i.e. the last "text" event in the
+// stream. The raw file is still saved separately for real debugging.
 import { readFile } from "node:fs/promises";
 
 const [inputPath] = process.argv.slice(2);

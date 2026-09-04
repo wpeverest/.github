@@ -60,11 +60,10 @@ on:
         default: ''
       artifacts-bucket:
         description: |
-          Bucket name to upload to. Not sensitive -- passed as a plain input,
-          not a secret. (If it WERE a secret, its value would get masked to
-          "***" everywhere it appears, including inside public-base-url and
-          the PR comment body, since Actions masks any string matching any
-          registered secret's value, wherever that string shows up.)
+          Bucket name to upload to. Not sensitive -- keep it a plain input,
+          not a secret (Actions masks any string matching a registered
+          secret's value everywhere it appears, which would break the
+          public-base-url and the PR comment's download link).
         type: string
         required: true
       public-base-url:
@@ -120,11 +119,9 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name)
     runs-on: ubuntu-latest
     steps:
-      # Explicit ref: without it, actions/checkout on a pull_request event
-      # checks out GitHub's synthetic merge commit (refs/pull/N/merge), not
-      # literally the PR's own head commit -- usually identical in content,
-      # but not guaranteed to be, and we label the zip by head.sha below, so
-      # build exactly that commit.
+      # Explicit ref: without it, a pull_request event checks out GitHub's
+      # synthetic merge commit, not the PR's own head -- and we label the zip
+      # by head.sha below, so build exactly that commit.
       - name: Check out PR head
         uses: actions/checkout@v4
         with:
@@ -136,10 +133,9 @@ jobs:
           php-version: ${{ inputs.php-version }}
           tools: composer
 
-      # pnpm must be on PATH before setup-node's cache step runs, since that
-      # step shells out to the package manager to resolve the cache directory.
-      # Needed on PATH even when install-command overrides the install step
-      # (e.g. a build-command that shells out to pnpm/grunt itself).
+      # pnpm must be on PATH before setup-node's cache step runs (it shells
+      # out to resolve the cache directory), even when install-command
+      # overrides the install step below.
       - name: Set up pnpm
         if: inputs.package-manager == 'pnpm'
         uses: pnpm/action-setup@v4
@@ -166,37 +162,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-deps-
 
-      # --no-dev: a testable/distributable ZIP should never bundle dev/test
-      # tooling (phpunit, test helpers, ...) -- matches what every repo's own
-      # manual release automation already does (grunt's release task runs
-      # `composer install --no-dev` internally, see composer-install's own
-      # comment above).
-      #
-      # --ignore-platform-reqs: --no-dev alone was NOT enough to fix
-      # everest-forms (confirmed for real) -- composer validates the WHOLE
-      # lock file's platform (PHP version) requirements up front, including
-      # require-dev packages, before deciding what to actually install. Its
-      # dev-only packages (spatie/phpunit-watcher, etc.) were locked to
-      # versions requiring PHP ^7.0, directly contradicting the production
-      # dependencies needing 8.2+ -- no single php-version input could ever
-      # satisfy both, and --no-dev doesn't skip validating the packages it's
-      # about to exclude. --ignore-platform-reqs skips that validation
-      # entirely; safe here specifically because --no-dev already means
-      # those conflicting packages are never actually installed, so nothing
-      # genuinely incompatible ends up in the built ZIP.
+      # --no-dev: a distributable ZIP should never bundle dev/test tooling.
+      # --ignore-platform-reqs: composer validates the WHOLE lockfile's PHP
+      # version requirement up front, including require-dev packages, even
+      # though --no-dev will exclude them. When dev-only deps declare an
+      # older PHP floor than production deps need, no single php-version
+      # input can satisfy both -- this flag skips that validation. Safe here
+      # because --no-dev already means those packages are never installed.
       - name: Install Composer dependencies
         if: inputs.composer-install
         run: composer install --prefer-dist --no-interaction --no-progress --no-dev --ignore-platform-reqs
 
       - name: Install JS dependencies
-        # install-command comes in via an env var, not direct ${{ }}
-        # interpolation into the script -- GitHub Actions substitutes ${{ }}
-        # textually with no shell-escaping, so a value containing a `"`
-        # breaks the `if [ -n "..." ]` test outright (confirmed for real: a
-        # quoted echo message here produced "syntax error: '--' unexpected"
-        # and silently fell through to the wrong branch instead of failing
-        # loudly). An env var's value is passed as real process data, so it
-        # can't corrupt the script text no matter what characters it contains.
+        # install-command comes in via env, not direct ${{ }} interpolation:
+        # ${{ }} is substituted textually with no shell-escaping, so a value
+        # containing a `"` can break the `if [ -n "..." ]` test below. An env
+        # var's value is real process data and can't corrupt the script text.
         env:
           INSTALL_COMMAND: ${{ inputs.install-command }}
         run: |
@@ -210,13 +191,10 @@ jobs:
             yarn install --frozen-lockfile
           fi
 
-      # Several repos' release tasks shell out to `wp i18n make-pot` to
-      # generate translation files -- that WP-CLI subcommand only parses PHP
-      # source for translatable strings, it needs no database/WordPress
-      # install, so the standalone .phar is enough. Installed unconditionally
-      # (cheap, and every other build-command here simply won't call `wp` if
-      # it doesn't need it) rather than gated behind a new input -- confirmed
-      # for real as the sole blocker on half a dozen repos' builds.
+      # Some release tasks shell out to `wp i18n make-pot`, which only parses
+      # PHP source (no DB/WordPress install needed) -- the standalone .phar is
+      # enough. Installed unconditionally since it's cheap and harmless for
+      # build-commands that don't call `wp` at all.
       - name: Install WP-CLI
         run: |
           curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
@@ -240,10 +218,8 @@ jobs:
           echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
           echo "size=$(du -h "$ZIP" | cut -f1)" >> "$GITHUB_OUTPUT"
 
-      # Keyed by branch, not commit SHA: each new push to the same PR overwrites
-      # the same object instead of piling up a fresh one per push. A PR with 20
-      # commits leaves exactly one zip in the bucket, not 20 waiting on the
-      # 30-day lifecycle rule to clean them up.
+      # Keyed by branch, not SHA: each push to the same PR overwrites the same
+      # object instead of piling up one per push.
       - name: Compute storage key
         id: key
         env:
@@ -270,9 +246,9 @@ jobs:
             ENDPOINT="--endpoint-url ${{ inputs.s3-endpoint }}"
           fi
           KEY="${{ steps.key.outputs.dir }}/${{ steps.zip.outputs.name }}"
-          # No --acl: modern S3 buckets enforce bucket-owner ownership (ACLs
-          # disabled) and R2 has no ACLs at all. Public read comes from the
-          # bucket policy / R2 public access, configured once at setup.
+          # No --acl: modern S3 enforces bucket-owner ownership (ACLs
+          # disabled) and R2 has none at all. Public read comes from the
+          # bucket policy / R2 public access set up once separately.
           aws s3 cp "${{ steps.zip.outputs.path }}" "s3://${{ inputs.artifacts-bucket }}/${KEY}" \
             $ENDPOINT --no-progress --content-type application/zip
           echo "url=${{ inputs.public-base-url }}/${KEY}" >> "$GITHUB_OUTPUT"
@@ -281,10 +257,8 @@ jobs:
         id: stamp
         run: echo "at=$(TZ='${{ inputs.timezone }}' date '+%b %-d, %Y %-I:%M %p %Z')" >> "$GITHUB_OUTPUT"
 
-      # Find our own previous comment by AUTHOR + marker.
-      # Never match on comment.user.type == 'Bot': a machine user account is
-      # type "User", so that check silently never matches and every push would
-      # post a brand new comment.
+      # Match by author + marker, never comment.user.type == 'Bot' -- a
+      # machine user account is type "User", so that check never matches.
       - name: Find previous bot comment
         uses: peter-evans/find-comment@v3
         id: find

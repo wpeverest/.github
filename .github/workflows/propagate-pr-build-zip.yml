@@ -1,13 +1,9 @@
 # One-shot(ish) bootstrap: opens a PR against every repo in
-# config/copilot-review-repos.json that doesn't already have a
-# pr-build-zip.yml caller workflow, with per-repo auto-detected build
-# settings. Manual dispatch only, unlike propagate-copilot-review.yml's
-# weekly schedule -- this isn't meant to keep re-syncing content (it never
-# touches a repo that already has the file, see the script's header comment),
-# so there's nothing for a recurring schedule to usefully catch beyond
-# newly-added config entries, and a human should review the auto-detected
-# build-command/zip-glob PRs it opens rather than have them appear silently
-# on a timer.
+# config/copilot-review-repos.json missing a pr-build-zip.yml caller, with
+# auto-detected build settings. Manual dispatch only (unlike
+# propagate-copilot-review.yml's weekly schedule) -- a human should review
+# each auto-detected build-command/zip-glob PR rather than have it appear
+# silently on a timer.
 name: Propagate PR build ZIP workflow
 
 on:

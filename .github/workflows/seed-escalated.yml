@@ -1,12 +1,8 @@
-# Manual, one-time-per-account maintenance workflow: marks a newly onboarded
-# Crisp account's entire current active-conversation backlog as already
-# auto-escalated, so crisp-triage.yml's first real scheduled run doesn't fire
-# a burst of investigations against tickets that predate integration (a
-# backlog of ~300 conversations was confirmed for real when onboarding the
-# User Registration account -- ~83% of its active backlog auto-escalated in
-# the first few minutes of a single run). Run this once, right after wiring
-# up a new account's Crisp secrets, before its first scheduled crisp-triage
-# run.
+# Manual, one-time-per-account workflow: marks a newly onboarded Crisp
+# account's entire active-conversation backlog as already auto-escalated, so
+# crisp-triage.yml's first scheduled run doesn't fire a burst of
+# investigations against tickets that predate integration. Run once, right
+# after wiring up a new account's Crisp secrets -- see onboard-crisp-account skill.
 name: Seed escalated state for a new Crisp account
 
 on:
@@ -23,7 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # BOT_TOKEN_THEMEGRILL, not BOT_TOKEN: this repo now lives in themegrill.
           token: ${{ secrets.BOT_TOKEN_THEMEGRILL }} # needs contents:write to commit the seeded state back
 
       - uses: actions/setup-node@v4
@@ -32,8 +27,7 @@ jobs:
 
       - name: Seed
         env:
-          # Same account roster as crisp-triage.yml's classify job -- add a
-          # new account's triple here whenever crisp-triage.yml gets one.
+          # Same account roster as crisp-triage.yml's classify job.
           CRISP_USER_REGISTRATION_IDENTIFIER: ${{ secrets.CRISP_USER_REGISTRATION_IDENTIFIER }}
           CRISP_USER_REGISTRATION_KEY: ${{ secrets.CRISP_USER_REGISTRATION_KEY }}
           CRISP_USER_REGISTRATION_WEBSITE_ID: ${{ vars.CRISP_USER_REGISTRATION_WEBSITE_ID }}
