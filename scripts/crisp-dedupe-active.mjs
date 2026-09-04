@@ -44,13 +44,16 @@ async function resolveRepo(accountConfig, transcript, conversation) {
   return (inboxKey && accountConfig.inboxes?.[inboxKey]?.repo) || null;
 }
 
+function issueKind(issue) {
+  return issue.labels?.some((l) => (l.name ?? l) === "feature-request") ? "feature request" : "bug";
+}
+
 // Title alone isn't enough context -- two issues can share a surface
 // phrase ("charged twice") while describing unrelated problems. A short
 // body excerpt lets the model compare what actually happened.
 function issueSummary(issue) {
-  const kind = issue.labels?.some((l) => (l.name ?? l) === "feature-request") ? "feature request" : "bug";
   const excerpt = (issue.body ?? "").slice(0, 500).replace(/\n+/g, " ").trim();
-  return `#${issue.number} (${kind}): ${issue.title}\n${excerpt}`;
+  return `#${issue.number} (${issueKind(issue)}): ${issue.title}\n${excerpt}`;
 }
 
 async function findMatchingIssue(transcript, issues) {
@@ -145,15 +148,18 @@ async function main() {
 
       matched++;
       const issueUrl = `https://github.com/${repo}/issues/${match.number}`;
+      const isFeature = issueKind(match) === "feature request";
       await commentOnIssue(
         repo,
         match.number,
-        `Another user appears to be hitting this same issue.\n\nSource: [Crisp conversation](${conversationUrl(creds, conversation.session_id)})`
+        `${isFeature ? "Another user has made this same request." : "Another user appears to be hitting this same issue."}\n\nSource: [Crisp conversation](${conversationUrl(creds, conversation.session_id)})`
       );
       await postNote(
         creds,
         conversation.session_id,
-        `This looks like a known tracked issue: ${issueUrl}`
+        isFeature
+          ? `This has already been requested: ${issueUrl}`
+          : `This looks like a known tracked issue: ${issueUrl}`
       );
       notified.add(conversation.session_id);
       console.log(`[${accountKey}] ${conversation.session_id}: matched ${repo}#${match.number}`);
