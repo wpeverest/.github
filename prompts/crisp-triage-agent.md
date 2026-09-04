@@ -24,6 +24,8 @@ You are triaging one customer support conversation for the `{{REPO}}` repository
    - Comment on it noting this is a recurrence, briefly stating what this conversation adds, and linking `[Crisp conversation]({{CONVERSATION_URL}})` as the source (do not repeat the full diagnosis if the issue already has one).
    - Do not file a new issue for something already tracked.
 
+   **Feature requests need a stricter match than bugs.** Two customers can want different things from a similar-sounding or vaguely-titled request -- only treat it as the same request if this transcript asks for the exact same capability, not just the same general area of the product. A question about whether something already exists, or how to configure it, is a how-to question, not a match for an open feature request.
+
 3. **For each item with a genuine match nothing tracks yet**, file one issue per item:
    ```
    gh issue create --repo {{REPO}} --title "..." --label bug-report,bug-report-triage --body-file <path>

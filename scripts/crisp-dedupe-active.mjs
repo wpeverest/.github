@@ -48,8 +48,9 @@ async function resolveRepo(accountConfig, transcript, conversation) {
 // phrase ("charged twice") while describing unrelated problems. A short
 // body excerpt lets the model compare what actually happened.
 function issueSummary(issue) {
+  const kind = issue.labels?.some((l) => (l.name ?? l) === "feature-request") ? "feature request" : "bug";
   const excerpt = (issue.body ?? "").slice(0, 500).replace(/\n+/g, " ").trim();
-  return `#${issue.number}: ${issue.title}\n${excerpt}`;
+  return `#${issue.number} (${kind}): ${issue.title}\n${excerpt}`;
 }
 
 async function findMatchingIssue(transcript, issues) {
@@ -58,15 +59,20 @@ async function findMatchingIssue(transcript, issues) {
   const { matchedNumber } = await chatJSON(
     "You check whether a customer support transcript describes the SAME " +
       "underlying problem as one of these already-tracked GitHub issues " +
-      "(title + a short excerpt of each):\n\n" +
+      "(number, kind, title, and a short excerpt of each):\n\n" +
       `${list}\n\nA match requires the same actual problem, not just similar ` +
       "wording -- e.g. a customer asking for a refund because their OWN " +
       "purchase/license was billed twice on wpeverest.com is NOT the same " +
       "issue as a product defect where the plugin's payment code double-" +
       "charges END USERS on a customer's own site, even though both could " +
-      'be described as "charged twice." Likewise, a general question about ' +
-      "how a feature/setting works, or a request for a feature that doesn't " +
-      "exist yet, is never a match for a tracked bug. " +
+      'be described as "charged twice." A general question about how a ' +
+      "feature/setting works is never a match for either kind. Feature " +
+      "requests need an even stricter bar than bugs: only match if the " +
+      "transcript asks for the EXACT SAME capability, not just a similar " +
+      "area of the product -- two customers can want different things from " +
+      'a vaguely-titled request. A question asking whether something ' +
+      "ALREADY EXISTS or how to configure it is a how-to question, never a " +
+      "match for an open feature request, even on the exact same feature. " +
       'Respond with ONLY a JSON object: {"matchedNumber": <issue number>} ' +
       'if there is a genuine match, or {"matchedNumber": null} if none clearly match or ' +
       "you're unsure. Be conservative -- a wrong match creates noise on someone " +
